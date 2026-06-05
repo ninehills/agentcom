@@ -1,0 +1,16 @@
+{
+  "name": "@agentcom/client",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "exports": {
+    ".": "./src/index.ts",
+    "./com-client": "./src/com-client.ts",
+    "./config": "./src/config.ts",
+    "./credentials": "./src/credentials.ts",
+    "./crypto": "./src/crypto.ts"
+  },
+  "dependencies": {
+    "@agentcom/protocol": "0.0.0"
+  }
+}
