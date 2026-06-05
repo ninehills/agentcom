@@ -59,9 +59,9 @@ export default function agentcomExtension(pi: any) {
   pi.on("session_start", async (_event: unknown, ctx: any) => {
     const result = await runtime.start(toCtx(ctx));
     startPresencePolling();
+    updateAgentComStatus(ctx, result);
     if (result.startsWith("connected")) {
       ctx.ui?.notify?.(`agentcom ${result}`, "info");
-      ctx.ui?.setStatus?.("agentcom", result);
     }
   });
 
@@ -87,6 +87,7 @@ export default function agentcomExtension(pi: any) {
     description: "agentcom remote session communication (/com auth/join/list/send/ask/reply/pending/status/rename/device/leave)",
     handler: async (args: string, ctx: any) => {
       const result = await runtime.handleCommand(args, toCtx(ctx));
+      updateAgentComStatus(ctx, result);
       ctx.ui?.notify?.(result, result.match(/error|failed|missing|not connected|unknown|multiple/i) ? "warning" : "info");
     },
   });
@@ -131,6 +132,27 @@ export default function agentcomExtension(pi: any) {
       return new TextComponent(text);
     },
   });
+}
+
+function updateAgentComStatus(ctx: any, result: string): void {
+  const status = formatAgentComStatus(result);
+  if (status) ctx.ui?.setStatus?.("agentcom", status);
+}
+
+export function formatAgentComStatus(result: string): string | undefined {
+  const text = result.trim();
+  const connected = /^connected\s+(.+)$/.exec(text);
+  if (connected) return `● ${connected[1]}`;
+
+  const joined = /^joined node\s+(.+), session\s+(.+)$/.exec(text);
+  if (joined) return `● ${joined[2]}@${joined[1]}`;
+
+  if (/^left room\b/.test(text)) return "○ agentcom";
+  if (text === "agentcom disabled") return "⏸ agentcom";
+  if (text === "agentcom not configured") return "⚙ agentcom";
+  if (/^No credential\b/.test(text)) return "○ agentcom";
+  if (/Device not found|revoked|Invalid or expired|auth failed|Failed to connect|Timed out connecting/i.test(text)) return "⚠ agentcom";
+  return undefined;
 }
 
 interface ThemeLike {

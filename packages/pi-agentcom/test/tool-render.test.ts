@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import agentcomExtension from "../src/index.ts";
+import agentcomExtension, { formatAgentComStatus } from "../src/index.ts";
 
 const theme = {
   fg(_name: string, text: string): string { return text; },
@@ -7,6 +7,14 @@ const theme = {
 };
 
 describe("agentcom tool rendering", () => {
+  it("formats footer connection state with compact icons", () => {
+    expect(formatAgentComStatus("connected s-zpk0qv3h@mbp")).toBe("● s-zpk0qv3h@mbp");
+    expect(formatAgentComStatus("joined node mbp, session s-zpk0qv3h")).toBe("● s-zpk0qv3h@mbp");
+    expect(formatAgentComStatus("left room and removed current server credential")).toBe("○ agentcom");
+    expect(formatAgentComStatus("agentcom not configured")).toBe("⚙ agentcom");
+    expect(formatAgentComStatus("Device not found or revoked")).toBe("⚠ agentcom");
+  });
+
   it("wraps long ask replies to the available terminal width", () => {
     const tool = registeredComTool();
     const component = tool.renderResult({
