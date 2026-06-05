@@ -16,8 +16,9 @@ agentcom 会给每个 Pi session 一个类似 `planner@imac` 或 `worker@macbook
 
 ## 前置条件
 
-- Node.js 支持现代 Web API（`fetch`、`WebSocket`、`crypto.subtle`）。
 - 一个可用的 Cloudflare 账号，开启 Workers、Durable Objects 和 Zero Trust Access。
+  - Zero Trust Acess 应该需要绑定信用卡，但是有免费额度
+
 - Wrangler 已登录：
 
   ```bash
@@ -35,43 +36,24 @@ agentcom 会给每个 Pi session 一个类似 `planner@imac` 或 `worker@macbook
 cp server/agentcom/wrangler.test.toml server/agentcom/wrangler.toml
 ```
 
-编辑 `server/agentcom/wrangler.toml`：
+编辑 `server/agentcom/wrangler.toml`，这里先用占位符
 
 ```toml
-name = "agentcom"
-main = "src/index.ts"
-compatibility_date = "2026-06-05"
-workers_dev = true
-
-[observability.logs]
-enabled = true
-invocation_logs = true
-
 [vars]
 TEAM_DOMAIN = "https://<your-team>.cloudflareaccess.com"
 POLICY_AUD = "<Cloudflare Access Application Audience AUD Tag>"
-
-[[durable_objects.bindings]]
-name = "ROOM"
-class_name = "ComRoom"
-
-[[migrations]]
-tag = "v1"
-new_sqlite_classes = ["ComRoom"]
 ```
 
-然后用 Wrangler 设置 token 签名密钥，不要写进 Git：
+然后用 Wrangler 设置 token 签名密钥
 
 ```bash
 openssl rand -base64 32
 npx wrangler secret put DEVICE_TOKEN_HMAC_SECRET --config server/agentcom/wrangler.toml
 ```
 
-部署前建议先跑检查：
+部署：
 
 ```bash
-npm test
-npm run typecheck
 npx wrangler deploy --config server/agentcom/wrangler.toml
 ```
 
@@ -81,44 +63,55 @@ npx wrangler deploy --config server/agentcom/wrangler.toml
 https://agentcom.<account>.workers.dev
 ```
 
+![alt text](image.png)
+
 ## 2. 配置 Cloudflare Access
 
-在 Cloudflare Zero Trust 里给浏览器认证页面创建一个 Access application：
+在 Worker 中开启 Cloudflare Access 认证，
 
-```text
-Zero Trust → Access → Applications → Add application → Self-hosted
+![alt text](image-1.png)
+
+但是这样会把 `/ws` 也放到 Access 后面，需要修改。
+
+进入 Zero-Trust Dashboard
+
+![alt text](image-2.png)
+
+Path 处加上 `/auth/`，别忘了下方点击 Save：
+
+![alt text](image-3.png)
+
+最后从如下两个地方找到 TEAM 和 AUG Tag：
+
+![alt text](image-4.png)
+
+![alt text](image-5.png)
+
+编辑 `server/agentcom/wrangler.toml`，填入对应的信息：
+
+```toml
+[vars]
+TEAM_DOMAIN = "https://<your-team>.cloudflareaccess.com"
+POLICY_AUD = "<Cloudflare Access Application Audience AUD Tag>"
 ```
 
-只保护这个路径：
+然后部署：
 
-```text
-Domain: agentcom.<account>.workers.dev
-Path: /auth/*
+```bash
+npx wrangler deploy --config server/agentcom/wrangler.toml
+
+# 会打印出来 worker地址，记下来后面用
 ```
-
-添加允许注册设备的人，例如：
-
-```text
-Allow → Include → Emails → you@example.com
-```
-
-把 application 里的 **Audience (AUD) Tag** 填到 `server/agentcom/wrangler.toml` 的 `POLICY_AUD`，修改后重新部署。
-
-> [!IMPORTANT]
-> 只保护 `/auth/*`。不要把 `/ws` 放到 Cloudflare Access 后面。Pi session 会直接连接 `/ws`，agentcom 会在 WebSocket 协议层用 device token 和设备签名做认证。
 
 快速验证：
 
 ```bash
+# 预期200
 curl -i https://agentcom.<account>.workers.dev/
+# 预期426
 curl -i https://agentcom.<account>.workers.dev/ws
-```
-
-普通 HTTP 请求访问 `/ws` 时应返回：
-
-```text
-HTTP/2 426
-Expected Upgrade: websocket
+# 预期 302
+curl -i https://agentcom.<account>.workers.dev/auth/device
 ```
 
 ## 3. 安装 Pi 扩展
@@ -143,16 +136,6 @@ pi install /absolute/path/to/agentcom
 ```text
 ~/.config/agentcom/config.json
 ~/.config/agentcom/credentials.json
-```
-
-常用可选配置：
-
-```json
-{
-  "autoJoin": true,
-  "confirmSend": false,
-  "replyHint": true
-}
 ```
 
 ## 4. 在 Pi 里加入 Worker
@@ -285,16 +268,3 @@ https://agentcom.<account>.workers.dev/auth/devices
 ```text
 /com leave
 ```
-
-## 常见问题
-
-| 现象 | 检查项 |
-| --- | --- |
-| `/com status` 显示未配置 | 先执行 `/com auth`，再执行 `/com join ...`。 |
-| `/auth/device` 返回 `Unauthorized` | 检查 Cloudflare Access policy，以及 `TEAM_DOMAIN` / `POLICY_AUD`。 |
-| `/auth/device` 提示 Worker misconfigured | 用 `wrangler secret put` 设置 `DEVICE_TOKEN_HMAC_SECRET`。 |
-| `/ws` 跳转到 Access | Access 保护范围太大，改成只保护 `/auth/*`。 |
-| 目标名称匹配多个 session | 使用 `session@node` 或 `/com list` 里的 `s-...` session id。 |
-| 某个设备不应再连接 | 打开 `/com device`，revoke 该设备。 |
-
-更多运维和测试细节见 [`server/agentcom/README.md`](server/agentcom/README.md)。

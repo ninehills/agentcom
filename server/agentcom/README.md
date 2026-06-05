@@ -46,6 +46,7 @@ npx wrangler whoami
 
 - Node.js 支持原生 `fetch`、`WebSocket`、`crypto.subtle`。当前开发环境使用 Node 25。
 - Wrangler 已登录有权限的 Cloudflare 账号。
+- Cloudflare Zero Trust Access 可能需要绑定信用卡，但 agentcom 的常规个人/团队使用一般在免费额度内。
 - 修改 Cloudflare Worker 配置、部署或查看日志时，优先使用仓库里的 `npx wrangler ...`，避免本机全局版本不一致。
 
 ## 3. 配置模型
@@ -88,7 +89,7 @@ AGENTCOM_TEST_ACCESS_EMAIL = "tester@example.com"
 cp server/agentcom/wrangler.test.toml server/agentcom/wrangler.toml
 ```
 
-然后编辑 `server/agentcom/wrangler.toml`：
+然后编辑 `server/agentcom/wrangler.toml`。首次部署时可以先保留 `TEAM_DOMAIN` / `POLICY_AUD` 占位符，等 Cloudflare Access 创建完成后再回填真实值：
 
 ```toml
 name = "agentcom"
@@ -141,7 +142,15 @@ agentcom 的关键设计是：只保护 `/auth/*`，不要保护 `/ws`。
 - `/ws` 面向 agent 进程。它必须公开接受 WebSocket upgrade，然后由 agentcom 协议自行校验 device token / 设备签名。
 - 如果把整个 `agentcom.swulling.workers.dev` 都放进 Access，agent 客户端无法正常连 `/ws`。
 
-Cloudflare Zero Trust 配置：
+Cloudflare 控制台可以从 Worker 页面开启 Access 认证：
+
+![在 Worker 中开启 Access](../../image-1.png)
+
+但这样可能会把 `/ws` 也放到 Access 后面，需要进入 Zero Trust Dashboard 修改路径。
+
+![进入 Zero Trust Dashboard](../../image-2.png)
+
+Cloudflare Zero Trust 配置入口：
 
 ```text
 Zero Trust → Access → Applications → Add application → Self-hosted
@@ -160,13 +169,48 @@ Domain: agentcom.swulling.workers.dev
 Path: /auth/*
 ```
 
+如果页面里是 Path 输入框，把 Path 设置为 `/auth/`，并确认点击页面底部的 **Save**：
+
+![Access path 设置为 auth](../../image-3.png)
+
 Policy 至少允许开发者邮箱，例如：
 
 ```text
-Allow → Include → Emails → swulling@gmail.com
+Allow → Include → Emails → you@example.com
 ```
 
-配置完成后，在 Access application 详情里找到 **Application Audience (AUD) Tag**，填入生产 `wrangler.toml` 的 `POLICY_AUD`。
+配置完成后，从 Access / Zero Trust 页面找到 Team domain 和 **Application Audience (AUD) Tag**：
+
+![Team domain](../../image-4.png)
+
+![AUD tag](../../image-5.png)
+
+然后填入生产 `server/agentcom/wrangler.toml`：
+
+```toml
+[vars]
+TEAM_DOMAIN = "https://<your-team>.cloudflareaccess.com"
+POLICY_AUD = "<Cloudflare Access Application Audience AUD Tag>"
+```
+
+修改后重新部署，并记下 Wrangler 输出的 Worker URL：
+
+```bash
+npx wrangler deploy --config server/agentcom/wrangler.toml
+```
+
+![部署后的 Worker URL](../../image.png)
+
+快速验证：
+
+```bash
+# 预期 200
+curl -i https://agentcom.<account>.workers.dev/
+# 预期 426，说明 /ws 没有被 Access 拦住
+curl -i https://agentcom.<account>.workers.dev/ws
+# 未登录时预期 302 跳转 Cloudflare Access
+curl -i https://agentcom.<account>.workers.dev/auth/device
+```
 
 ## 5. 本地开发流程
 

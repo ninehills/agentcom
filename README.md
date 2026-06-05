@@ -16,8 +16,8 @@ agentcom gives every Pi session an address like `planner@imac` or `worker@macboo
 
 ## Prerequisites
 
-- Node.js with modern Web APIs (`fetch`, `WebSocket`, `crypto.subtle`).
 - A Cloudflare account with Workers, Durable Objects, and Zero Trust Access.
+  - Zero Trust Access may require a billing method, but agentcom fits within the free tier for typical personal/team use.
 - Wrangler login:
 
   ```bash
@@ -35,32 +35,15 @@ Create a production Worker config from the checked-in test config:
 cp server/agentcom/wrangler.test.toml server/agentcom/wrangler.toml
 ```
 
-Edit `server/agentcom/wrangler.toml`:
+Edit `server/agentcom/wrangler.toml`; at this point, keep the Cloudflare Access values as placeholders:
 
 ```toml
-name = "agentcom"
-main = "src/index.ts"
-compatibility_date = "2026-06-05"
-workers_dev = true
-
-[observability.logs]
-enabled = true
-invocation_logs = true
-
 [vars]
 TEAM_DOMAIN = "https://<your-team>.cloudflareaccess.com"
 POLICY_AUD = "<Cloudflare Access Application Audience AUD Tag>"
-
-[[durable_objects.bindings]]
-name = "ROOM"
-class_name = "ComRoom"
-
-[[migrations]]
-tag = "v1"
-new_sqlite_classes = ["ComRoom"]
 ```
 
-Then set the token signing secret with Wrangler, not in Git:
+Then set the token signing secret with Wrangler:
 
 ```bash
 openssl rand -base64 32
@@ -70,8 +53,6 @@ npx wrangler secret put DEVICE_TOKEN_HMAC_SECRET --config server/agentcom/wrangl
 Deploy:
 
 ```bash
-npm test
-npm run typecheck
 npx wrangler deploy --config server/agentcom/wrangler.toml
 ```
 
@@ -81,44 +62,55 @@ Your Worker base URL will look like:
 https://agentcom.<account>.workers.dev
 ```
 
+![Worker URL after deploy](image.png)
+
 ## 2. Configure Cloudflare Access
 
-Create a Cloudflare Zero Trust Access application for the browser auth pages only:
+Enable Cloudflare Access authentication for the Worker:
 
-```text
-Zero Trust → Access → Applications → Add application → Self-hosted
+![Enable Access for the Worker](image-1.png)
+
+This may put `/ws` behind Access too, so adjust the application path.
+
+Open the Zero Trust dashboard:
+
+![Zero Trust dashboard](image-2.png)
+
+Set the path to `/auth/`, then click **Save** near the bottom:
+
+![Access path set to auth](image-3.png)
+
+Finally, find the Team domain and AUD tag from these two places:
+
+![Team domain](image-4.png)
+
+![AUD tag](image-5.png)
+
+Edit `server/agentcom/wrangler.toml` with the values:
+
+```toml
+[vars]
+TEAM_DOMAIN = "https://<your-team>.cloudflareaccess.com"
+POLICY_AUD = "<Cloudflare Access Application Audience AUD Tag>"
 ```
 
-Use this hostname/path:
+Then deploy again:
 
-```text
-Domain: agentcom.<account>.workers.dev
-Path: /auth/*
+```bash
+npx wrangler deploy --config server/agentcom/wrangler.toml
+
+# Keep the printed Worker URL; you will need it in Pi.
 ```
-
-Add a policy that allows the people who may register devices, for example:
-
-```text
-Allow → Include → Emails → you@example.com
-```
-
-Copy the application **Audience (AUD) Tag** into `POLICY_AUD` in `server/agentcom/wrangler.toml`, then redeploy if you changed it.
-
-> [!IMPORTANT]
-> Protect `/auth/*` only. Do **not** put `/ws` behind Cloudflare Access. Pi sessions connect to `/ws` directly and agentcom authenticates them with device tokens and device signatures.
 
 Quick checks:
 
 ```bash
+# Expected: 200
 curl -i https://agentcom.<account>.workers.dev/
+# Expected: 426
 curl -i https://agentcom.<account>.workers.dev/ws
-```
-
-Expected `/ws` result for a plain HTTP request:
-
-```text
-HTTP/2 426
-Expected Upgrade: websocket
+# Expected: 302 redirect to Cloudflare Access when not signed in
+curl -i https://agentcom.<account>.workers.dev/auth/device
 ```
 
 ## 3. Install the Pi extension
@@ -143,16 +135,6 @@ agentcom stores local config and device credentials under:
 ```text
 ~/.config/agentcom/config.json
 ~/.config/agentcom/credentials.json
-```
-
-Common optional settings:
-
-```json
-{
-  "autoJoin": true,
-  "confirmSend": false,
-  "replyHint": true
-}
 ```
 
 ## 4. Join a Worker from Pi
@@ -285,16 +267,3 @@ To remove the current local credential from Pi:
 ```text
 /com leave
 ```
-
-## Troubleshooting
-
-| Symptom | What to check |
-| --- | --- |
-| `/com status` says not configured | Run `/com auth`, then `/com join ...`. |
-| `/auth/device` returns `Unauthorized` | Check Cloudflare Access policy and `TEAM_DOMAIN` / `POLICY_AUD`. |
-| `/auth/device` says Worker misconfigured | Set `DEVICE_TOKEN_HMAC_SECRET` with `wrangler secret put`. |
-| `/ws` redirects to Access | Access is protecting too much. Restrict it to `/auth/*`. |
-| Target name matches multiple sessions | Use `session@node` or the `s-...` session id from `/com list`. |
-| A device should stop connecting | Open `/com device` and revoke it. |
-
-More operational details are in [`server/agentcom/README.md`](server/agentcom/README.md).
