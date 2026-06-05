@@ -11,7 +11,8 @@
     "test:worker": "vitest run",
     "test:client": "vitest run --config vitest.node.config.ts",
     "typecheck": "tsc -b",
-    "test:integration:real": "node scripts/agentcom-real-integration.mjs"
+    "test:integration:real": "node scripts/agentcom-real-integration.mjs",
+    "test:pi-extension": "node scripts/agentcom-pi-extension-smoke.mjs"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.16.13",

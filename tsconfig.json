@@ -1,8 +1,17 @@
 {
   "files": [],
   "references": [
-    { "path": "packages/protocol" },
-    { "path": "packages/client" },
-    { "path": "server/agentcom" }
+    {
+      "path": "packages/protocol"
+    },
+    {
+      "path": "packages/client"
+    },
+    {
+      "path": "server/agentcom"
+    },
+    {
+      "path": "./packages/pi-agentcom"
+    }
   ]
 }
