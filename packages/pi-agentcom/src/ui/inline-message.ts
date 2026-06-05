@@ -12,10 +12,7 @@ export function replyCommandFor(message: AgentComMessage): string | undefined {
 }
 
 export function formatInlineMessage(details: InlineMessageDetails): string {
-  const body = details.bodyText ?? details.message.content.text;
-  const parts = [`agentcom message from ${details.from.address}: ${body}`];
-  if (details.replyCommand) parts.push(`Reply with ${details.replyCommand} or /com reply <message>.`);
-  return parts.join("\n");
+  return renderInlineMessageBox(details, 104).join("\n");
 }
 
 export class InlineMessageComponent {
@@ -30,46 +27,9 @@ export class InlineMessageComponent {
   invalidate(): void {}
 
   render(width: number): string[] {
-    if (width < 3) return [truncateToWidth(`From ${senderName(this.details.from)}`, Math.max(0, width))];
-
-    const lines: string[] = [];
-    const bodyWidth = Math.max(1, width - 2);
     const accent = (text: string) => this.theme?.fg?.("accent", text) ?? text;
     const dim = (text: string) => this.theme?.fg?.("dim", text) ?? text;
-    const row = (text = "") => {
-      const clipped = truncateToWidth(text, bodyWidth, "", true);
-      return `${accent("│")}${clipped}${" ".repeat(Math.max(0, bodyWidth - visibleWidth(clipped)))}${accent("│")}`;
-    };
-
-    const header = ` 📨 From: ${senderName(this.details.from)} (${this.details.from.cwd}) `;
-    const headerText = truncateToWidth(header, bodyWidth, "", true);
-    lines.push(accent(`╭${headerText}${"─".repeat(Math.max(0, bodyWidth - visibleWidth(headerText)))}╮`));
-
-    const body = this.details.bodyText ?? this.details.message.content.text;
-    for (const line of wrapText(body, bodyWidth)) lines.push(row(line));
-
-    if (this.details.replyCommand) {
-      lines.push(row());
-      for (const line of wrapText(` ↩ To reply: ${this.details.replyCommand} or /com reply <message>`, bodyWidth)) {
-        lines.push(row(dim(line)));
-      }
-    }
-
-    const attachments = this.details.message.content.attachments ?? [];
-    if (attachments.length > 0) {
-      lines.push(row());
-      for (const attachment of attachments) {
-        for (const line of wrapText(` 📎 ${attachment.name}`, bodyWidth)) lines.push(row(dim(line)));
-      }
-    }
-
-    if (this.details.message.replyTo && !this.details.message.expectsReply) {
-      lines.push(row());
-      lines.push(row(dim(` ↳ Reply to ${this.details.message.replyTo.slice(0, 8)}`)));
-    }
-
-    lines.push(accent(`╰${"─".repeat(bodyWidth)}╯`));
-    return lines;
+    return renderInlineMessageBox(this.details, width, { accent, dim });
   }
 }
 
@@ -83,6 +43,49 @@ function isThemeLike(theme: unknown): theme is ThemeLike {
 
 function senderName(from: SessionInfo): string {
   return from.address || from.name || from.id.slice(0, 8);
+}
+
+function renderInlineMessageBox(details: InlineMessageDetails, width: number, theme: { accent?: (text: string) => string; dim?: (text: string) => string } = {}): string[] {
+  if (width < 3) return [truncateToWidth(`From ${senderName(details.from)}`, Math.max(0, width))];
+
+  const lines: string[] = [];
+  const bodyWidth = Math.max(1, width - 2);
+  const accent = theme.accent ?? ((text: string) => text);
+  const dim = theme.dim ?? ((text: string) => text);
+  const row = (text = "") => {
+    const clipped = truncateToWidth(text, bodyWidth, "", true);
+    return `${accent("│")}${clipped}${" ".repeat(Math.max(0, bodyWidth - visibleWidth(clipped)))}${accent("│")}`;
+  };
+
+  const header = ` 📨 From: ${senderName(details.from)} (${details.from.cwd}) `;
+  const headerText = truncateToWidth(header, bodyWidth, "", true);
+  lines.push(accent(`╭${headerText}${"─".repeat(Math.max(0, bodyWidth - visibleWidth(headerText)))}╮`));
+
+  const body = details.bodyText ?? details.message.content.text;
+  for (const line of wrapText(body, bodyWidth)) lines.push(row(line));
+
+  if (details.replyCommand) {
+    lines.push(row());
+    for (const line of wrapText(` ↩ To reply: ${details.replyCommand} or /com reply <message>`, bodyWidth)) {
+      lines.push(row(dim(line)));
+    }
+  }
+
+  const attachments = details.message.content.attachments ?? [];
+  if (attachments.length > 0) {
+    lines.push(row());
+    for (const attachment of attachments) {
+      for (const line of wrapText(` 📎 ${attachment.name}`, bodyWidth)) lines.push(row(dim(line)));
+    }
+  }
+
+  if (details.message.replyTo && !details.message.expectsReply) {
+    lines.push(row());
+    lines.push(row(dim(` ↳ Reply to ${details.message.replyTo.slice(0, 8)}`)));
+  }
+
+  lines.push(accent(`╰${"─".repeat(bodyWidth)}╯`));
+  return lines;
 }
 
 const ANSI_RE = /\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g;

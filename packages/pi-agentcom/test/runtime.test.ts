@@ -113,6 +113,31 @@ describe("AgentComRuntime commands", () => {
     expect(clients[0].sent.at(-1)).toMatchObject({ to: "s-bob", options: { text: "message from panel" } });
   });
 
+  it("sends incoming messages through the custom renderer channel when available", async () => {
+    const { runtime, clients, entries, ctx } = await setup();
+    const customMessages: Array<{ message: any; options: any }> = [];
+    await runtime.handleCommand("join wss://agentcom.example/ws com_dev_ok", ctx());
+    runtime.handleTurnStart(ctx({
+      sendMessage: (message, options) => customMessages.push({ message, options }),
+      injectMessage: vi.fn(),
+      ui: undefined,
+    }));
+
+    clients[0].emitMessage(bob, { id: "m-render-3", timestamp: 5, expectsReply: true, content: { text: "pretty please" } });
+
+    expect(entries).toContainEqual(expect.objectContaining({ type: "agentcom_message" }));
+    expect(customMessages.at(-1)).toMatchObject({
+      message: {
+        customType: "agentcom_message",
+        display: true,
+        content: expect.stringContaining("**📨 From bob@devbox**"),
+        details: expect.objectContaining({ from: bob, message: expect.objectContaining({ id: "m-render-3" }) }),
+      },
+      options: { triggerTurn: true },
+    });
+    expect(customMessages.at(-1)?.message.content).toContain("agentcom tool");
+  });
+
   it("uses pi-intercom-style custom overlays for the empty /com panel", async () => {
     const { runtime, clients, ui, entries, ctx } = await setup({ customDraft: "from overlay" });
     await runtime.handleCommand("join wss://agentcom.example/ws com_dev_ok", ctx());

@@ -43,6 +43,7 @@ export interface AgentComContext {
   mode?: string;
   askTimeoutMs?: number;
   ui?: AgentComUi;
+  sendMessage?: (message: { customType: string; content: string; display?: boolean; details?: unknown }, options?: { deliverAs?: "steer" | "followUp"; triggerTurn?: boolean }) => void;
   injectMessage?: (message: string, options?: { deliverAs?: "steer" | "followUp" }) => void;
   appendEntry?: (type: string, details: unknown) => void;
 }
@@ -464,6 +465,15 @@ export class AgentComRuntime {
     };
     const text = formatInlineMessage(details);
     ctx.appendEntry?.("agentcom_message", details);
+    if (ctx.sendMessage) {
+      ctx.sendMessage({
+        customType: "agentcom_message",
+        content: formatIncomingContent(details),
+        display: true,
+        details,
+      }, deliverAs === "followUp" ? { deliverAs: "followUp" } : { triggerTurn: true });
+      return;
+    }
     ctx.ui?.notify?.(text, "info");
     ctx.injectMessage?.(text, { deliverAs });
   }
@@ -544,6 +554,13 @@ function splitN(input: string, count: 2): string[] {
 
 function formatSession(session: SessionInfo): string {
   return `${session.address} id=${session.id} node=${session.nodeName} cwd=${session.cwd} runtime=${session.runtime} status=${session.status ?? "unknown"} model=${session.model}`;
+}
+
+function formatIncomingContent(details: InlineMessageDetails): string {
+  const sender = details.from.address || details.from.name || details.from.id.slice(0, 8);
+  const replyInstruction = details.replyCommand ? `\n\nTo reply, use the agentcom tool: ${details.replyCommand} or /com reply <message>` : "";
+  const body = details.bodyText ?? details.message.content.text;
+  return `**📨 From ${sender}** (${details.from.cwd})${replyInstruction}\n\n${body}`;
 }
 
 function formatSendResult(result: SendResult): string {

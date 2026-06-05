@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AgentComMessage, SessionInfo } from "@agentcom/protocol";
-import { InlineMessageComponent, replyCommandFor } from "../src/ui/inline-message.ts";
+import { formatInlineMessage, InlineMessageComponent, replyCommandFor } from "../src/ui/inline-message.ts";
 
 const theme = {
   fg(_name: string, text: string): string {
@@ -32,6 +32,15 @@ const message: AgentComMessage = {
 };
 
 describe("InlineMessageComponent", () => {
+  it("formats injected messages as the same bordered card", () => {
+    const text = formatInlineMessage({ from, message });
+
+    expect(text).toContain("╭ 📨 From: sender@mbp (/tmp/project) ");
+    expect(text).toContain("│This is a long message");
+    expect(text).toContain("╰");
+    for (const line of text.split("\n")) expect(visibleWidth(line)).toBe(104);
+  });
+
   it("renders at the available terminal width", () => {
     const component = new InlineMessageComponent({ from, message }, theme);
 

@@ -30,6 +30,9 @@ export default function agentcomExtension(pi: any) {
       hasUI: ctx.hasUI,
       mode: ctx.mode,
       ui: ctx.ui,
+      sendMessage: (message, options) => {
+        if (typeof pi.sendMessage === "function") pi.sendMessage(message, options);
+      },
       injectMessage: (message, options) => {
         if (typeof pi.sendUserMessage === "function") pi.sendUserMessage(message, options);
       },
