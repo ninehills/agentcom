@@ -1,5 +1,7 @@
 # agentcom
 
+[中文 README](README-zh.md)
+
 Remote 1:1 messaging between Pi sessions across machines.
 
 agentcom gives every Pi session an address like `planner@imac` or `worker@macbook`, then lets users or agents list online sessions, send messages, ask for replies, and answer pending asks through `/com` or the `com` tool.
