@@ -76,7 +76,8 @@ export class SessionListOverlay {
   }
 
   render(width: number): string[] {
-    const innerWidth = Math.max(36, Math.min(width - 2, 88));
+    if (width < 3) return [truncateToWidth("Sessions", Math.max(0, width), "", true)];
+    const innerWidth = Math.max(3, Math.min(width, 88));
     const contentWidth = Math.max(1, innerWidth - 2);
     const confirmKeys = this.keybindings.getKeys("tui.select.confirm").join("/") || "Enter";
     const cancelKeys = this.keybindings.getKeys("tui.select.cancel").join("/") || "Esc";

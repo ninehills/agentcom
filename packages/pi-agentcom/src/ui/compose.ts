@@ -101,7 +101,8 @@ export class ComposeOverlay {
   }
 
   render(width: number): string[] {
-    const innerWidth = Math.max(24, Math.min(width - 2, 72));
+    if (width < 3) return [truncateToWidth("Message", Math.max(0, width), "", true)];
+    const innerWidth = Math.max(3, Math.min(width, 72));
     const contentWidth = Math.max(1, innerWidth - 2);
     const confirmKeys = this.keybindings.getKeys("tui.select.confirm").join("/") || "Enter";
     const cancelKeys = this.keybindings.getKeys("tui.select.cancel").join("/") || "Esc";
