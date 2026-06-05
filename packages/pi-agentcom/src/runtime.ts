@@ -134,8 +134,7 @@ export class AgentComRuntime {
 
   handleTurnStart(ctx: AgentComContext): void {
     this.latestCtx = ctx;
-    const context = this.replyTracker.beginTurn(this.now());
-    if (context) this.renderIncoming(context.from, context.message, ctx, "steer");
+    this.replyTracker.beginTurn(this.now());
   }
 
   handleTurnEnd(): void {
@@ -175,7 +174,7 @@ export class AgentComRuntime {
       let text: string;
       switch (params.action) {
         case "list": text = await this.list(); break;
-        case "send": text = await this.sendTo(params.to, message, params.attachments, ctx); break;
+        case "send": text = await this.sendTo(params.to, message, params.attachments, ctx, params.replyTo); break;
         case "ask": text = await this.ask(params.to, message, ctx, params.attachments); break;
         case "reply": text = await this.reply(message, params.replyTo, params.to); break;
         case "pending": text = await this.pending(); break;
@@ -253,6 +252,7 @@ export class AgentComRuntime {
     }
     const result = await client.send(resolved.sessionId, { text, attachments, replyTo });
     if (!result.delivered) return `Message to "${target}" was not delivered: ${result.reason ?? "Session may not exist or has disconnected."}`;
+    if (replyTo) this.replyTracker.markReplied(replyTo);
     ctx?.appendEntry?.("agentcom_sent", { to: target, message: { text, attachments, replyTo }, messageId: result.id, timestamp: this.now() });
     return `Message sent to ${target}`;
   }
@@ -448,6 +448,7 @@ export class AgentComRuntime {
     const context = this.replyTracker.recordIncomingMessage(from, message, this.now());
     if (!this.latestCtx) return;
     if (this.latestCtx.isIdle) {
+      this.replyTracker.queueTurnContext(context);
       this.renderIncoming(from, message, this.latestCtx, "steer");
     } else {
       this.replyTracker.queueTurnContext(context);

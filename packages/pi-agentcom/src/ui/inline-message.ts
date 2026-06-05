@@ -8,7 +8,7 @@ export interface InlineMessageDetails {
 }
 
 export function replyCommandFor(message: AgentComMessage): string | undefined {
-  return message.expectsReply ? `com({ action: "reply", msg: "...", replyTo: "${message.id}" })` : undefined;
+  return message.expectsReply ? `com({ action: "reply", msg: "..." })` : undefined;
 }
 
 export function formatInlineMessage(details: InlineMessageDetails): string {

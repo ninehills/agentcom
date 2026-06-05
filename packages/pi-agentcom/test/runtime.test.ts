@@ -101,7 +101,7 @@ describe("AgentComRuntime commands", () => {
     await expect(runtime.handleCommand("pending", ctx())).resolves.toContain("please reply");
     await expect(runtime.handleCommand("reply yes", ctx())).resolves.toContain("Reply sent");
     expect(clients[0].sent.at(-1)).toMatchObject({ to: "s-bob", options: { text: "yes", replyTo: "m-remote-ask" } });
-    expect(ui.messages.join("\n")).toContain("com({ action: \"reply\", msg: \"...\", replyTo: \"m-remote-ask\" })");
+    expect(ui.messages.join("\n")).toContain("com({ action: \"reply\", msg: \"...\" })");
     expect(entries).toContainEqual(expect.objectContaining({ type: "agentcom_message", details: expect.objectContaining({ from: bob, message: expect.objectContaining({ id: "m-remote-ask" }) }) }));
     expect(entries.at(-1)).toMatchObject({ type: "agentcom_sent", details: { message: { text: "yes", replyTo: "m-remote-ask" } } });
 
@@ -140,12 +140,14 @@ describe("AgentComRuntime commands", () => {
 
   it("triggers a turn for follow-up custom incoming messages if the agent is idle by delivery time", async () => {
     const { runtime, clients, ctx } = await setup();
+    const entries: Array<{ type: string; details: unknown }> = [];
     const customMessages: Array<{ message: any; options: any }> = [];
     await runtime.handleCommand("join wss://agentcom.example/ws com_dev_ok", ctx());
     runtime.handleTurnStart(ctx({
       isIdle: false,
       sendMessage: (message, options) => customMessages.push({ message, options }),
       injectMessage: vi.fn(),
+      appendEntry: (type: string, details: unknown) => entries.push({ type, details }),
       ui: undefined,
     }));
 
@@ -155,6 +157,75 @@ describe("AgentComRuntime commands", () => {
       message: { customType: "agentcom_message", content: expect.stringContaining("hello") },
       options: { deliverAs: "followUp", triggerTurn: true },
     });
+
+    runtime.handleTurnStart(ctx({
+      sendMessage: (message, options) => customMessages.push({ message, options }),
+      injectMessage: vi.fn(),
+      appendEntry: (type: string, details: unknown) => entries.push({ type, details }),
+      ui: undefined,
+    }));
+
+    expect(customMessages).toHaveLength(1);
+    expect(entries.filter((entry) => entry.type === "agentcom_message")).toHaveLength(1);
+  });
+
+  it("keeps a queued follow-up ask as the implicit reply target without rendering it twice", async () => {
+    const { runtime, clients, ctx } = await setup();
+    const customMessages: Array<{ message: any; options: any }> = [];
+    await runtime.handleCommand("join wss://agentcom.example/ws com_dev_ok", ctx());
+
+    clients[0].emitMessage(bob, { id: "m-existing", timestamp: 5, expectsReply: true, content: { text: "first" } });
+    runtime.handleTurnStart(ctx({
+      isIdle: false,
+      sendMessage: (message, options) => customMessages.push({ message, options }),
+      injectMessage: vi.fn(),
+      ui: undefined,
+    }));
+    clients[0].emitMessage(bob, { id: "m-follow-up", timestamp: 6, expectsReply: true, content: { text: "second" } });
+
+    runtime.handleTurnStart(ctx({
+      sendMessage: (message, options) => customMessages.push({ message, options }),
+      injectMessage: vi.fn(),
+      ui: undefined,
+    }));
+
+    expect(customMessages).toHaveLength(1);
+    await expect(runtime.handleTool({ action: "reply", msg: "ok" }, ctx())).resolves.toMatchObject({ ok: true });
+    expect(clients[0].sent.at(-1)).toMatchObject({ to: "s-bob", options: { text: "ok", replyTo: "m-follow-up" } });
+  });
+
+  it("uses the triggered incoming ask as the implicit reply target even with multiple pending asks", async () => {
+    const { runtime, clients, ctx } = await setup();
+    const customMessages: Array<{ message: any; options: any }> = [];
+    await runtime.handleCommand("join wss://agentcom.example/ws com_dev_ok", ctx());
+    runtime.handleTurnStart(ctx({
+      sendMessage: (message, options) => customMessages.push({ message, options }),
+      injectMessage: vi.fn(),
+      ui: undefined,
+    }));
+
+    clients[0].emitMessage(bob, { id: "m-triggered", timestamp: 7, expectsReply: true, content: { text: "first ask" } });
+    clients[0].emitMessage(session({ id: "s-eve", name: "eve", nodeName: "devbox" }), { id: "m-other", timestamp: 8, expectsReply: true, content: { text: "second ask" } });
+    runtime.handleTurnStart(ctx({
+      sendMessage: (message, options) => customMessages.push({ message, options }),
+      injectMessage: vi.fn(),
+      ui: undefined,
+    }));
+
+    expect(customMessages.at(0)).toMatchObject({ options: { triggerTurn: true } });
+    await expect(runtime.handleTool({ action: "reply", msg: "answer current" }, ctx())).resolves.toMatchObject({ ok: true });
+    expect(clients[0].sent.at(-1)).toMatchObject({ to: "s-bob", options: { text: "answer current", replyTo: "m-triggered" } });
+  });
+
+  it("allows send with replyTo to clear a pending ask like pi-intercom", async () => {
+    const { runtime, clients, ctx } = await setup();
+    await runtime.handleCommand("join wss://agentcom.example/ws com_dev_ok", ctx());
+    clients[0].emitMessage(bob, { id: "m-send-reply", timestamp: 9, expectsReply: true, content: { text: "please answer" } });
+
+    await expect(runtime.handleTool({ action: "send", to: "bob", msg: "answered", replyTo: "m-send-reply" }, ctx())).resolves.toMatchObject({ ok: true });
+
+    expect(clients[0].sent.at(-1)).toMatchObject({ to: "s-bob", options: { text: "answered", replyTo: "m-send-reply" } });
+    await expect(runtime.handleCommand("pending", ctx())).resolves.toBe("No pending asks.");
   });
 
   it("uses pi-intercom-style custom overlays for the empty /com panel", async () => {

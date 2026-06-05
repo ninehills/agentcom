@@ -35,10 +35,9 @@ export class ReplyTracker {
     this.queuedTurnContexts.push(context);
   }
 
-  beginTurn(now = Date.now()): AgentComMessageContext | null {
+  beginTurn(now = Date.now()): void {
     this.pruneExpired(now);
     this.currentTurnContext = this.queuedTurnContexts.shift() ?? null;
-    return this.currentTurnContext;
   }
 
   endTurn(): void {
