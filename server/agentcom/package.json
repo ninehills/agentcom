@@ -1,0 +1,9 @@
+{
+  "name": "@agentcom/worker",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "dependencies": {
+    "@agentcom/protocol": "0.0.0"
+  }
+}

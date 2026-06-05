@@ -1,1 +1,21 @@
-{}
+{
+  "name": "agentcom",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "server/*"
+  ],
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc -b",
+    "test:integration:real": "node scripts/agentcom-real-integration.mjs"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.16.13",
+    "@cloudflare/workers-types": "^4.20260605.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.8",
+    "wrangler": "^4.98.0"
+  }
+}
