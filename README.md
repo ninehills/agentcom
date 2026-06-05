@@ -128,6 +128,7 @@ pi install /absolute/path/to/agentcom
 Restart Pi after installing. The extension registers:
 
 - `/com` command for users.
+  - Run `/com` with no arguments to open the session picker and message compose panel.
 - `com` tool for agents.
 
 agentcom stores local config and device credentials under:
@@ -187,6 +188,12 @@ List online sessions:
 
 ```text
 /com list
+```
+
+Or open the interactive panel and pick a target:
+
+```text
+/com
 ```
 
 Example output:

@@ -129,6 +129,7 @@ pi install /absolute/path/to/agentcom
 安装后重启 Pi。扩展会注册：
 
 - `/com` 命令，给用户使用。
+  - 直接执行不带参数的 `/com`，可以打开 session 选择和消息编辑面板。
 - `com` tool，给 agent 使用。
 
 本地配置和设备凭证会保存到：
@@ -188,6 +189,12 @@ https://agentcom.<account>.workers.dev
 
 ```text
 /com list
+```
+
+也可以打开交互式面板，选择目标后发送消息：
+
+```text
+/com
 ```
 
 示例输出：
