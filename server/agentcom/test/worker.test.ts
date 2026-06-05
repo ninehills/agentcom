@@ -128,7 +128,7 @@ describe("agentcom Worker", () => {
     expect(await nextJson(client.socket)).toEqual({ type: "delivery_failed", messageId: "m-bad", reason: "Invalid send message" });
   });
 
-  it("shows and revokes the current user's devices", async () => {
+  it("shows, revokes, and deletes the current user's revoked devices", async () => {
     const client = await registerClient({ name: "device", hostname: "device-box" });
 
     const devices = await fetchWorker("https://agentcom.example/auth/devices");
@@ -139,6 +139,14 @@ describe("agentcom Worker", () => {
     expect(html).toContain("device-box");
     expect(html).toContain("tester@example.com");
     expect(html).toContain("Last seen");
+    expect(html).toContain("Revoke");
+
+    const activeDelete = await fetchWorker("https://agentcom.example/auth/delete", {
+      method: "POST",
+      body: new URLSearchParams({ deviceId: client.message.deviceId }),
+      redirect: "manual",
+    });
+    expect(activeDelete.status).toBe(409);
 
     const revoked = await fetchWorker("https://agentcom.example/auth/revoke", {
       method: "POST",
@@ -147,8 +155,23 @@ describe("agentcom Worker", () => {
     });
     expect(revoked.status).toBe(303);
 
+    const revokedDevices = await fetchWorker("https://agentcom.example/auth/devices");
+    const revokedHtml = await revokedDevices.text();
+    expect(revokedHtml).toContain(client.message.deviceId);
+    expect(revokedHtml).toContain("Delete permanently");
+
     const socket = await connectWebSocket();
     socket.send(JSON.stringify({ type: "auth_begin", requestId: "req-revoked", deviceId: client.message.deviceId }));
     expect(await nextJson(socket)).toMatchObject({ type: "auth_failed", reason: "Device not found or revoked" });
+
+    const deleted = await fetchWorker("https://agentcom.example/auth/delete", {
+      method: "POST",
+      body: new URLSearchParams({ deviceId: client.message.deviceId }),
+      redirect: "manual",
+    });
+    expect(deleted.status).toBe(303);
+
+    const afterDelete = await fetchWorker("https://agentcom.example/auth/devices");
+    expect(await afterDelete.text()).not.toContain(client.message.deviceId);
   });
 });

@@ -202,7 +202,7 @@ npm run typecheck
 - 设备 token 单次使用。
 - P-256 签名重连。
 - `list`、`send`、`presence`、`rename_node`、`unregister`。
-- revoke 后禁止重连。
+- revoke 后禁止重连，且已 revoke 设备可从设备页删除。
 
 这些测试运行在 Cloudflare Workers/Vitest 测试池里，速度快，适合每次改动后先跑。
 
@@ -375,6 +375,7 @@ open https://agentcom.swulling.workers.dev/auth/devices
 2. 登录后回到 `/auth/devices`。
 3. 页面标题为 `Registered devices`。
 4. 已注册设备展示 nodeName、hostname、deviceId、nodeId、email、created、last seen、revoked 状态。
+5. active 设备显示 `Revoke`；revoked 设备显示 `Delete permanently`。
 
 获取 token 并手动注册设备：
 

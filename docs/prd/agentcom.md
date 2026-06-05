@@ -228,7 +228,7 @@ agentcom/
   server/
     agentcom/            # Cloudflare Worker + ComRoom DO
       src/
-        index.ts         # Worker 入口：路由 /ws /auth/device /auth/devices /auth/revoke
+        index.ts         # Worker 入口：路由 /ws /auth/device /auth/devices /auth/revoke /auth/delete
         room.ts          # ComRoom DO：sessions + auth + messaging
       wrangler.toml
       package.json

@@ -22,10 +22,35 @@ export async function revokeAndVerifyDevice(h, alice) {
     h.assert(failed.reason === "Device not found or revoked", `unexpected revoked failure: ${failed.reason}`);
     reconnect.close();
   });
+
+  await h.step("delete revoked device from management page", async () => {
+    const beforeDelete = await h.http("GET", "/auth/devices");
+    h.assert(beforeDelete.body.includes("Delete permanently"), "revoked devices page missing delete button");
+
+    const response = await h.deleteDevice(alice.register.deviceId, "alice");
+    h.assert(response.status === 303, `POST /auth/delete expected 303, got ${response.status}`);
+    h.assert(response.headers.location === "/auth/devices", `unexpected delete location ${response.headers.location}`);
+
+    const afterDelete = await h.http("GET", "/auth/devices");
+    h.assert(!afterDelete.body.includes(alice.register.deviceId), "deleted device still appears on devices page");
+  });
 }
 
 export async function cleanupDevices(h, { bob, clientDevices, piRuntimeDevices }) {
-  await h.step("cleanup bob device", () => h.revokeDevice(bob.register.deviceId, "bob cleanup"));
-  await h.step("cleanup RemoteComClient devices", () => Promise.all(clientDevices.map((deviceId) => h.revokeDevice(deviceId, "client cleanup"))));
-  await h.step("cleanup AgentComRuntime devices", () => Promise.all(piRuntimeDevices.map((deviceId) => h.revokeDevice(deviceId, "pi runtime cleanup"))));
+  await h.step("cleanup bob device", async () => {
+    await h.revokeDevice(bob.register.deviceId, "bob cleanup");
+    await h.deleteDevice(bob.register.deviceId, "bob cleanup");
+  });
+  await h.step("cleanup RemoteComClient devices", async () => {
+    await Promise.all(clientDevices.map(async (deviceId) => {
+      await h.revokeDevice(deviceId, "client cleanup");
+      await h.deleteDevice(deviceId, "client cleanup");
+    }));
+  });
+  await h.step("cleanup AgentComRuntime devices", async () => {
+    await Promise.all(piRuntimeDevices.map(async (deviceId) => {
+      await h.revokeDevice(deviceId, "pi runtime cleanup");
+      await h.deleteDevice(deviceId, "pi runtime cleanup");
+    }));
+  });
 }

@@ -24,6 +24,7 @@
 │  │  GET /auth/device  → Access 保护 → 生成 device token (HTML)   │   │
 │  │  GET /auth/devices → Access 保护 → 设备管理页                 │   │
 │  │  POST /auth/revoke → Access 保护 → 撤销设备                   │   │
+│  │  POST /auth/delete → Access 保护 → 删除已撤销设备             │   │
 │  │  GET /ws      → 公开入口 → Durable Object: ComRoom            │   │
 │  │                                                               │   │
 │  │  ComRoom DO:                                                  │   │
@@ -91,7 +92,7 @@ agentcom/
   server/
     agentcom/           # Cloudflare Worker + ComRoom DO
       src/
-        index.ts        # Worker 入口: 路由 /ws /auth/device /auth/devices /auth/revoke
+        index.ts        # Worker 入口: 路由 /ws /auth/device /auth/devices /auth/revoke /auth/delete
         room.ts         # ComRoom DO: sessions + auth + messaging
       wrangler.toml
       package.json

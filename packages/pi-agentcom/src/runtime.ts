@@ -5,8 +5,8 @@ import { getConfigPaths, loadConfig, normalizeServerUrl, saveConfig, type AgentC
 import { loadCredential, removeCredential, saveCredential } from "@agentcom/client/credentials";
 import type { AgentComCredential } from "@agentcom/client/credentials";
 import { ReplyTracker } from "./reply-tracker.ts";
-import { composeMessage } from "./ui/compose.ts";
-import { buildSessionOptions } from "./ui/session-list.ts";
+import { ComposeOverlay, composeMessage, formatAttachments, type ComposeResult } from "./ui/compose.ts";
+import { buildSessionOptions, defaultKeybindings, defaultTheme, SessionListOverlay, sessionDisplayName } from "./ui/session-list.ts";
 import { formatInlineMessage, replyCommandFor, type InlineMessageDetails } from "./ui/inline-message.ts";
 
 export interface ClientLike {
@@ -17,6 +17,7 @@ export interface ClientLike {
   connect(options: unknown): Promise<void>;
   disconnect(): void;
   isConnected(): boolean;
+  updatePresence(updates: { name?: string; status?: string; model?: string }): void;
   listSessions(): Promise<SessionInfo[]>;
   send(toSessionId: string, options: { text: string; attachments?: Attachment[]; replyTo?: string; expectsReply?: boolean; messageId?: string }): Promise<SendResult>;
   renameNode(nodeName: string): Promise<string>;
@@ -27,6 +28,8 @@ export interface AgentComUi {
   input?(title: string, placeholder?: string): Promise<string | undefined>;
   select?(title: string, options: string[]): Promise<string | undefined>;
   editor?(title: string, prefill?: string): Promise<string | undefined>;
+  confirm?(title: string, message: string): Promise<boolean>;
+  custom?<T>(factory: (tui: unknown, theme: unknown, keybindings: unknown, done: (result: T) => void) => unknown, options?: { overlay?: boolean }): Promise<T>;
   notify?(message: string, type?: "info" | "warning" | "error"): void;
   setStatus?(key: string, text: string | undefined): void;
 }
@@ -36,6 +39,8 @@ export interface AgentComContext {
   model?: string;
   sessionName?: string;
   isIdle?: boolean;
+  hasUI?: boolean;
+  mode?: string;
   askTimeoutMs?: number;
   ui?: AgentComUi;
   injectMessage?: (message: string, options?: { deliverAs?: "steer" | "followUp" }) => void;
@@ -61,6 +66,7 @@ interface RuntimeOptions {
 
 interface OutgoingAsk {
   to: string;
+  targetSessionId: string;
   messageId: string;
   text: string;
   status: "waiting" | "answered" | "timed_out";
@@ -78,6 +84,7 @@ export class AgentComRuntime {
   private clientServerUrl: string | null = null;
   private unsubscribeMessage: (() => void) | null = null;
   private latestCtx: AgentComContext | null = null;
+  private lastPresenceKey: string | null = null;
   private readonly replyTracker: ReplyTracker;
   private readonly outgoingAsks = new Map<string, OutgoingAsk>();
 
@@ -107,6 +114,7 @@ export class AgentComRuntime {
         publicKeyJwk: credential.publicKeyJwk,
         session: this.registration(ctx),
       });
+      this.lastPresenceKey = this.presenceKey(ctx);
       this.attachClient(client);
       return `connected ${client.sessionId ?? "unknown-session"}@${client.nodeName ?? credential.nodeName}`;
     } catch (error) {
@@ -144,7 +152,7 @@ export class AgentComRuntime {
         case "device": return await this.device(ctx);
         case "join": return await this.join(rest, ctx);
         case "list": return await this.list();
-        case "send": return await this.sendCommand(rest);
+        case "send": return await this.sendCommand(rest, ctx);
         case "ask": return await this.askCommand(rest, ctx);
         case "reply": return await this.reply(rest);
         case "pending": return await this.pending();
@@ -160,14 +168,15 @@ export class AgentComRuntime {
 
   async handleTool(params: ComToolParams, ctx: AgentComContext): Promise<{ ok: boolean; text: string; details?: unknown }> {
     this.latestCtx = ctx;
+    this.config = await loadConfig(this.paths) as AgentComConfig & { enabled?: boolean };
     try {
       const message = params.message ?? params.msg ?? "";
       let text: string;
       switch (params.action) {
         case "list": text = await this.list(); break;
-        case "send": text = await this.sendTo(params.to, message, params.attachments); break;
+        case "send": text = await this.sendTo(params.to, message, params.attachments, ctx); break;
         case "ask": text = await this.ask(params.to, message, ctx, params.attachments); break;
-        case "reply": text = await this.reply(message, params.replyTo); break;
+        case "reply": text = await this.reply(message, params.replyTo, params.to); break;
         case "pending": text = await this.pending(); break;
         case "status": text = await this.status(); break;
         default: text = `Unknown com action: ${(params as { action: string }).action}`;
@@ -208,33 +217,43 @@ export class AgentComRuntime {
       preferredNodeName: this.getHostname(),
       session: this.registration(ctx),
     });
+    this.lastPresenceKey = this.presenceKey(ctx);
     this.attachClient(client);
     if (client.credential) await saveCredential(serverUrl, client.credential, this.paths);
     return this.notify(ctx, `joined node ${client.nodeName ?? "unknown-node"}, session ${client.sessionId ?? "unknown-session"}`, "info");
   }
 
   private async list(): Promise<string> {
+    if (this.latestCtx) this.syncCurrentPresence(this.latestCtx);
     const client = this.requireConnected();
     const sessions = await client.listSessions();
     if (sessions.length === 0) return "No online sessions.";
     return sessions.map(formatSession).join("\n");
   }
 
-  private async sendCommand(rest: string): Promise<string> {
+  private async sendCommand(rest: string, ctx: AgentComContext): Promise<string> {
     const [target, text] = splitN(rest, 2);
     if (!target || !text) return "Usage: /com send <target> <message>";
-    return this.sendTo(target, text);
+    return this.sendTo(target, text, undefined, ctx);
   }
 
-  private async sendTo(target: string | undefined, text: string, attachments?: Attachment[]): Promise<string> {
+  private async sendTo(target: string | undefined, text: string, attachments?: Attachment[], ctx?: AgentComContext, replyTo?: string): Promise<string> {
     if (!target) return "Missing target.";
     if (!text) return "Missing message.";
     const client = this.requireConnected();
+    if (this.latestCtx) this.syncCurrentPresence(this.latestCtx);
     const sessions = await client.listSessions();
     const resolved = resolveTarget(sessions, target);
     if (!resolved.found) return resolved.reason;
-    const result = await client.send(resolved.sessionId, { text, attachments });
-    return formatSendResult(result);
+    if (resolved.sessionId === client.sessionId) return "Cannot message the current session";
+    if (!replyTo && this.config.confirmSend && ctx?.hasUI && ctx.ui?.confirm) {
+      const confirmed = await ctx.ui.confirm("Send Message", `Send to "${target}":\n\n${text}${formatAttachments(attachments)}`);
+      if (!confirmed) return "Message cancelled by user";
+    }
+    const result = await client.send(resolved.sessionId, { text, attachments, replyTo });
+    if (!result.delivered) return `Message to "${target}" was not delivered: ${result.reason ?? "Session may not exist or has disconnected."}`;
+    ctx?.appendEntry?.("agentcom_sent", { to: target, message: { text, attachments, replyTo }, messageId: result.id, timestamp: this.now() });
+    return `Message sent to ${target}`;
   }
 
   private async askCommand(rest: string, ctx: AgentComContext): Promise<string> {
@@ -245,10 +264,13 @@ export class AgentComRuntime {
   private async ask(target: string | undefined, text: string, ctx: AgentComContext, attachments?: Attachment[]): Promise<string> {
     if (!target) return "Usage: /com ask <target> <message>";
     if (!text) return "Missing message.";
+    if ([...this.outgoingAsks.values()].some((ask) => ask.status === "waiting")) return "Already waiting for a reply";
     const client = this.requireConnected();
+    this.syncCurrentPresence(ctx);
     const sessions = await client.listSessions();
     const resolved = resolveTarget(sessions, target);
     if (!resolved.found) return resolved.reason;
+    if (resolved.sessionId === client.sessionId) return "Cannot message the current session";
     const messageId = `m-${this.randomId()}`;
     let timeout: ReturnType<typeof setTimeout> | null = null;
     const clearPendingAsk = () => {
@@ -265,6 +287,7 @@ export class AgentComRuntime {
       }, ctx.askTimeoutMs ?? 10 * 60 * 1000);
       this.outgoingAsks.set(messageId, {
         to: target,
+        targetSessionId: resolved.sessionId,
         messageId,
         text,
         status: "waiting",
@@ -285,18 +308,22 @@ export class AgentComRuntime {
       clearPendingAsk();
       return formatSendResult(ack);
     }
+    ctx.appendEntry?.("agentcom_sent", { to: target, message: { text, attachments, expectsReply: true }, messageId: ack.id, timestamp: this.now() });
     const reply = await replyPromise;
-    return reply ? `reply from ${target}: ${reply.content.text}` : `ask delivered but timed out waiting for reply (${messageId})`;
+    if (!reply) return `ask delivered but timed out waiting for reply (${messageId})`;
+    ctx.appendEntry?.("agentcom_received", { from: target, message: { text: reply.content.text, attachments: reply.content.attachments }, messageId: reply.id, timestamp: reply.timestamp });
+    return `**Reply from ${target}:**\n${reply.content.text}${formatAttachments(reply.content.attachments)}`;
   }
 
-  private async reply(text: string, replyTo?: string): Promise<string> {
+  private async reply(text: string, replyTo?: string, to?: string): Promise<string> {
     if (!text) return "Usage: /com reply <message>";
     const client = this.requireConnected();
-    const ask = this.replyTracker.resolveReplyTarget({ replyTo }, this.now());
+    const ask = this.replyTracker.resolveReplyTarget({ replyTo, to }, this.now());
     const result = await client.send(ask.from.id, { text, replyTo: ask.message.id });
     if (!result.delivered) return formatSendResult(result);
     this.replyTracker.markReplied(ask.message.id);
-    return `replied to ${ask.from.address}: ${result.id}`;
+    this.latestCtx?.appendEntry?.("agentcom_sent", { to: ask.from.address, message: { text, replyTo: ask.message.id }, messageId: result.id, timestamp: this.now() });
+    return `Reply sent to ${ask.from.address}`;
   }
 
   private async pending(): Promise<string> {
@@ -310,6 +337,7 @@ export class AgentComRuntime {
   }
 
   private async status(): Promise<string> {
+    if (this.latestCtx) this.syncCurrentPresence(this.latestCtx);
     const serverUrl = this.config.serverUrl ? normalizeServerUrl(this.config.serverUrl) : "not configured";
     const connected = this.client?.isConnected() ?? false;
     let count = 0;
@@ -344,7 +372,14 @@ export class AgentComRuntime {
 
   private async panel(ctx: AgentComContext): Promise<string> {
     const client = this.requireConnected();
-    const sessions = (await client.listSessions()).filter((session) => session.id !== client.sessionId);
+    this.syncCurrentPresence(ctx);
+    const allSessions = await client.listSessions();
+    const currentSession = allSessions.find((session) => session.id === client.sessionId);
+    const sessions = allSessions.filter((session) => session.id !== client.sessionId);
+    if (!currentSession) return "Current session is missing from agentcom session list.";
+    if (ctx.ui?.custom && ctx.hasUI !== false && ctx.mode !== "rpc") {
+      return this.panelOverlay(ctx, client, currentSession, sessions);
+    }
     if (sessions.length === 0) return "No other online sessions.";
     const options = buildSessionOptions(sessions, client.sessionId, ctx.cwd);
     const labels = options.map((option) => option.label);
@@ -355,7 +390,32 @@ export class AgentComRuntime {
     const text = await composeMessage(ctx.ui, "Message");
     if (!text) return "No message entered.";
     const result = await client.send(session.id, { text });
-    return formatSendResult(result);
+    if (!result.delivered) return formatSendResult(result);
+    ctx.appendEntry?.("agentcom_sent", { to: sessionDisplayName(session), message: { text }, messageId: result.id, timestamp: this.now() });
+    return `Message sent to ${sessionDisplayName(session)}`;
+  }
+
+  private async panelOverlay(ctx: AgentComContext, client: ClientLike, currentSession: SessionInfo, sessions: SessionInfo[]): Promise<string> {
+    const selectedSession = await ctx.ui?.custom?.<SessionInfo | undefined>(
+      (_tui, theme, keybindings, done) => new SessionListOverlay(defaultTheme(theme), defaultKeybindings(keybindings), currentSession, sessions, done),
+      { overlay: true },
+    ).catch(() => undefined);
+    if (!selectedSession) return "No target selected.";
+
+    const result = await ctx.ui?.custom?.<ComposeResult>(
+      (tui, theme, keybindings, done) => new ComposeOverlay(tui, theme, keybindings, selectedSession, sessionDisplayName(selectedSession), client, done),
+      { overlay: true },
+    ).catch(() => undefined);
+
+    if (!result?.sent || !result.messageId || !result.text) return "No message sent.";
+    ctx.appendEntry?.("agentcom_sent", {
+      to: sessionDisplayName(selectedSession),
+      message: { text: result.text },
+      messageId: result.messageId,
+      timestamp: this.now(),
+    });
+    ctx.ui?.notify?.(`Message sent to ${sessionDisplayName(selectedSession)}`, "info");
+    return `Message sent to ${sessionDisplayName(selectedSession)}`;
   }
 
   private attachClient(client: ClientLike): void {
@@ -364,12 +424,27 @@ export class AgentComRuntime {
     this.unsubscribeMessage = client.onMessage((from, message) => this.handleIncoming(from, message));
   }
 
+  syncCurrentPresence(ctx: AgentComContext): void {
+    if (!this.client?.isConnected()) return;
+    const key = this.presenceKey(ctx);
+    if (key === this.lastPresenceKey) return;
+    this.client.updatePresence({
+      name: ctx.sessionName?.trim() ?? "",
+      model: ctx.model ?? "unknown",
+      status: ctx.isIdle === false ? "working" : "idle",
+    });
+    this.lastPresenceKey = key;
+  }
+
   private handleIncoming(from: SessionInfo, message: AgentComMessage): void {
-    const context = this.replyTracker.recordIncomingMessage(from, message, this.now());
     if (message.replyTo) {
       const ask = this.outgoingAsks.get(message.replyTo);
-      if (ask) ask.resolve(message);
+      if (ask && ask.targetSessionId === from.id) {
+        ask.resolve(message);
+        return;
+      }
     }
+    const context = this.replyTracker.recordIncomingMessage(from, message, this.now());
     if (!this.latestCtx) return;
     if (this.latestCtx.isIdle) {
       this.renderIncoming(from, message, this.latestCtx, "steer");
@@ -380,7 +455,13 @@ export class AgentComRuntime {
   }
 
   private renderIncoming(from: SessionInfo, message: AgentComMessage, ctx: AgentComContext, deliverAs: "steer" | "followUp"): void {
-    const details: InlineMessageDetails = { from, message, replyCommand: replyCommandFor(message) };
+    const bodyText = `${message.content.text}${formatAttachments(message.content.attachments)}`;
+    const details: InlineMessageDetails = {
+      from,
+      message,
+      bodyText,
+      replyCommand: this.config.replyHint === false ? undefined : replyCommandFor(message),
+    };
     const text = formatInlineMessage(details);
     ctx.appendEntry?.("agentcom_message", details);
     ctx.ui?.notify?.(text, "info");
@@ -411,6 +492,14 @@ export class AgentComRuntime {
       lastActivity: this.now(),
       status: "idle",
     };
+  }
+
+  private presenceKey(ctx: AgentComContext): string {
+    return JSON.stringify({
+      name: ctx.sessionName?.trim() ?? "",
+      model: ctx.model ?? "unknown",
+      status: ctx.isIdle === false ? "working" : "idle",
+    });
   }
 
   private async saveConfig(config: AgentComConfig & { enabled?: boolean }): Promise<void> {

@@ -37,6 +37,8 @@ agentcom.<subdomain>.workers.dev
   │                            展示当前登录邮箱注册的设备
   ├── POST /auth/revoke    → Cloudflare Access → ComRoom DO
   │                            撤销当前登录邮箱名下的设备
+  ├── POST /auth/delete    → Cloudflare Access → ComRoom DO
+  │                            删除当前登录邮箱名下已撤销的设备
   └── GET  /               → 健康检查
 ```
 
@@ -48,6 +50,7 @@ agentcom.<subdomain>.workers.dev
 | `/auth/device` | 是 | 浏览器 | 生成 device token 与 join 命令 |
 | `/auth/devices` | 是 | 浏览器 | 查看自己邮箱注册的设备 |
 | `/auth/revoke` | 是 | 浏览器表单 | 撤销自己邮箱注册的设备 |
+| `/auth/delete` | 是 | 浏览器表单 | 删除自己邮箱注册且已撤销的设备 |
 | `/` | 否 | 任意 | 健康检查 |
 
 ---
@@ -339,13 +342,14 @@ Access-authenticated browser request
   → active 行正常显示
   → revoked 行灰色显示
   → active 行提供 Revoke 表单按钮
+  → revoked 行提供 Delete permanently 表单按钮
 ```
 
 规则：
 
 - 用户只能查看自己邮箱注册的设备。
 - 不做 room 管理员任意撤销。
-- 撤销前使用浏览器原生 confirm。
+- 撤销和删除前使用浏览器原生 confirm。
 
 ### 9.3 `/auth/revoke`
 
@@ -364,6 +368,24 @@ Access-authenticated POST
 - 用户只能撤销自己邮箱注册的设备。
 - 撤销后服务端拒绝该设备后续重连。
 - 客户端本地 credential 不自动删除。
+
+### 9.4 `/auth/delete`
+
+```
+Access-authenticated POST
+  → Worker 提取 email
+  → DO 读取 deviceId
+  → 校验 device.email == 当前 email
+  → 校验 device.revokedAt 已存在
+  → 删除 device:<deviceId> 与 node:<nodeId>
+  → 303 redirect 到 /auth/devices
+```
+
+规则：
+
+- 用户只能删除自己邮箱注册且已经撤销的设备。
+- 未撤销设备返回 409，必须先 revoke 再 delete。
+- 删除后 nodeName 可被后续注册重新分配。
 
 ---
 

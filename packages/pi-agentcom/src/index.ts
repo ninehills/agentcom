@@ -16,32 +16,61 @@ const comToolParameters = {
 
 export default function agentcomExtension(pi: any) {
   const runtime = new AgentComRuntime();
+  let latestPiCtx: any = null;
+  let presenceTimer: ReturnType<typeof setInterval> | null = null;
 
-  const toCtx = (ctx: any): AgentComContext => ({
-    cwd: ctx.cwd ?? process.cwd(),
-    model: ctx.model ? `${ctx.model.provider ?? ""}${ctx.model.provider ? "/" : ""}${ctx.model.id ?? "unknown"}` : "unknown",
-    sessionName: typeof pi.getSessionName === "function" ? pi.getSessionName() : undefined,
-    isIdle: ctx.isIdle,
-    ui: ctx.ui,
-    injectMessage: (message, options) => {
-      if (typeof pi.sendUserMessage === "function") pi.sendUserMessage(message, options);
-    },
-    appendEntry: (type, details) => {
-      if (typeof pi.appendEntry === "function") pi.appendEntry(type, details);
-    },
-  });
+  const toCtx = (ctx: any): AgentComContext => {
+    latestPiCtx = ctx;
+    return {
+      cwd: ctx.cwd ?? process.cwd(),
+      model: ctx.model ? `${ctx.model.provider ?? ""}${ctx.model.provider ? "/" : ""}${ctx.model.id ?? "unknown"}` : "unknown",
+      sessionName: typeof pi.getSessionName === "function" ? pi.getSessionName() : undefined,
+      isIdle: typeof ctx.isIdle === "function" ? ctx.isIdle() : ctx.isIdle,
+      hasUI: ctx.hasUI,
+      mode: ctx.mode,
+      ui: ctx.ui,
+      injectMessage: (message, options) => {
+        if (typeof pi.sendUserMessage === "function") pi.sendUserMessage(message, options);
+      },
+      appendEntry: (type, details) => {
+        if (typeof pi.appendEntry === "function") pi.appendEntry(type, details);
+      },
+    };
+  };
+
+  const startPresencePolling = () => {
+    if (presenceTimer) return;
+    presenceTimer = setInterval(() => {
+      if (!latestPiCtx) return;
+      runtime.syncCurrentPresence(toCtx(latestPiCtx));
+    }, 1_000);
+    (presenceTimer as { unref?: () => void }).unref?.();
+  };
+
+  const stopPresencePolling = () => {
+    if (presenceTimer) clearInterval(presenceTimer);
+    presenceTimer = null;
+  };
 
   pi.on("session_start", async (_event: unknown, ctx: any) => {
     const result = await runtime.start(toCtx(ctx));
+    startPresencePolling();
     if (result.startsWith("connected")) {
       ctx.ui?.notify?.(`agentcom ${result}`, "info");
       ctx.ui?.setStatus?.("agentcom", result);
     }
   });
 
-  pi.on("turn_start", (_event: unknown, ctx: any) => runtime.handleTurnStart(toCtx(ctx)));
+  pi.on("turn_start", (_event: unknown, ctx: any) => {
+    const currentCtx = toCtx(ctx);
+    runtime.syncCurrentPresence(currentCtx);
+    runtime.handleTurnStart(currentCtx);
+  });
   pi.on("turn_end", () => runtime.handleTurnEnd());
-  pi.on("session_shutdown", () => runtime.shutdown());
+  pi.on("session_shutdown", () => {
+    stopPresencePolling();
+    runtime.shutdown();
+  });
 
   if (typeof pi.registerMessageRenderer === "function") {
     pi.registerMessageRenderer("agentcom_message", (message: { details?: InlineMessageDetails }, _options: unknown, theme: unknown) => {
@@ -72,9 +101,54 @@ export default function agentcomExtension(pi: any) {
       return {
         content: [{ type: "text", text: result.text }],
         details: result.details,
+        isError: !result.ok,
       };
     },
+    renderCall(args: Record<string, unknown>, theme: ThemeLike) {
+      const action = typeof args.action === "string" ? args.action : "com";
+      const target = typeof args.to === "string" && args.to.trim() ? args.to.trim() : undefined;
+      const messagePreview = previewText(args.message, 96);
+      const attachmentCount = Array.isArray(args.attachments) ? args.attachments.length : 0;
+      let text = theme.fg("toolTitle", theme.bold("agentcom "));
+      text += theme.fg(action === "ask" ? "warning" : action === "reply" ? "success" : "accent", action);
+      if (target) text += " " + theme.fg("muted", "→") + " " + theme.fg("accent", target);
+      if (attachmentCount > 0) text += " " + theme.fg("dim", `(${attachmentCount} attachment${attachmentCount === 1 ? "" : "s"})`);
+      if (messagePreview) text += "\n  " + theme.fg("dim", messagePreview);
+      return new TextComponent(text);
+    },
+    renderResult(result: { content?: Array<{ type: string; text?: string }>; details?: unknown }, context: { isPartial?: boolean }, theme: ThemeLike, renderContext: { isError?: boolean; expanded?: boolean }) {
+      if (context.isPartial) return new TextComponent(theme.fg("warning", "AgentCom working..."));
+      const details = result.details as { delivered?: boolean; error?: boolean; messageId?: string; reason?: string } | undefined;
+      const failed = Boolean(renderContext.isError || details?.error === true || details?.delivered === false);
+      let text = failed ? theme.fg("error", "✗ ") : theme.fg("success", "✓ ");
+      text += theme.fg(failed ? "error" : "text", firstTextContent(result));
+      if (details?.messageId && !renderContext.expanded) text += theme.fg("dim", ` (${details.messageId.slice(0, 8)})`);
+      if (details?.reason && renderContext.expanded) text += "\n" + theme.fg("dim", `Reason: ${details.reason}`);
+      return new TextComponent(text);
+    },
   });
+}
+
+interface ThemeLike {
+  fg(name: string, text: string): string;
+  bold(text: string): string;
+}
+
+class TextComponent {
+  constructor(private readonly text: string) {}
+  invalidate(): void {}
+  render(): string[] { return this.text.split("\n"); }
+}
+
+function previewText(value: unknown, maxLength = 72): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (!normalized) return undefined;
+  return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 1)}…` : normalized;
+}
+
+function firstTextContent(result: { content?: Array<{ type: string; text?: string }> }): string {
+  return result.content?.find((item) => item.type === "text" && typeof item.text === "string")?.text?.replace(/\*\*/g, "") ?? "";
 }
 
 export { AgentComRuntime, normalizeAuthBaseUrl } from "./runtime.ts";

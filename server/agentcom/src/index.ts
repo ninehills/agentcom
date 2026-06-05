@@ -111,6 +111,7 @@ export class ComRoom extends DurableObject<Env> {
     if (url.pathname === "/auth/device") return this.handleDeviceToken(request, email);
     if (url.pathname === "/auth/devices") return this.handleDevices(email);
     if (url.pathname === "/auth/revoke") return this.handleRevoke(request, email);
+    if (url.pathname === "/auth/delete") return this.handleDeleteDevice(request, email);
 
     return new Response("Not found", { status: 404 });
   }
@@ -328,8 +329,8 @@ export class ComRoom extends DurableObject<Env> {
         const createdAt = new Date(device.createdAt).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" });
         const lastSeenAt = new Date(device.lastSeenAt).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" });
         const revokedAt = device.revokedAt ? new Date(device.revokedAt).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" }) : null;
-        const revoke = device.revokedAt
-          ? ""
+        const action = device.revokedAt
+          ? `<form method="post" action="/auth/delete"><input type="hidden" name="deviceId" value="${escapeHtml(device.deviceId)}"><button class="danger" type="submit" onclick="return confirm('Delete this revoked device permanently?')">Delete permanently</button></form>`
           : `<form method="post" action="/auth/revoke"><input type="hidden" name="deviceId" value="${escapeHtml(device.deviceId)}"><button type="submit" onclick="return confirm('Revoke this device?')">Revoke</button></form>`;
         return `<li data-device-id="${escapeHtml(device.deviceId)}" class="device-row ${status}">
           <div class="device-main"><strong>${escapeHtml(node?.nodeName ?? "unknown-node")}</strong><p>${escapeHtml(node?.hostname ?? "unknown hostname")}</p></div>
@@ -341,7 +342,7 @@ export class ComRoom extends DurableObject<Env> {
             <div><dt>Last seen</dt><dd>${escapeHtml(lastSeenAt)} UTC</dd></div>
             ${revokedAt ? `<div><dt>Revoked</dt><dd>${escapeHtml(revokedAt)} UTC</dd></div>` : ""}
           </dl>
-          <div class="device-actions"><span>${status}</span>${revoke}</div>
+          <div class="device-actions"><span>${status}</span>${action}</div>
         </li>`;
       })
       .join("");
@@ -373,6 +374,7 @@ export class ComRoom extends DurableObject<Env> {
       .device-row span { border-radius: 999px; padding: 6px 10px; background: #e7f8df; color: #315b23; font-size: 12px; font-weight: 800; text-transform: uppercase; }
       .device-row.revoked span { background: #ded8ce; color: #6f675d; }
       button { border: 0; border-radius: 999px; padding: 9px 14px; background: #15130f; color: #fffaf0; font-weight: 800; cursor: pointer; }
+      button.danger { background: #8a241f; }
       @media (max-width: 760px) { body { place-items: start center; } main { margin: 24px auto; } .device-row, dl { grid-template-columns: 1fr; } .device-actions { justify-items: start; } }
     </style></head><body><main><header><p class="eyebrow">agentcom devices</p><h1>Registered devices</h1></header><div class="panel">${rows ? `<ul>${content}</ul>` : content}</div></main></body></html>`;
     return new Response(html, { headers: { "content-type": "text/html; charset=utf-8" } });
@@ -392,6 +394,25 @@ export class ComRoom extends DurableObject<Env> {
         entry.ws.close(1008, "Device revoked");
       }
     }
+    return new Response(null, { status: 303, headers: { location: "/auth/devices" } });
+  }
+
+  private async handleDeleteDevice(request: Request, email: string): Promise<Response> {
+    if (request.method !== "POST") return new Response("Method not allowed", { status: 405 });
+    const form = await request.formData();
+    const deviceId = String(form.get("deviceId") ?? "");
+    const device = await this.roomState.storage.get<DeviceRecord>(`device:${deviceId}`);
+    if (!device || device.email !== email) return new Response("Not found", { status: 404 });
+    if (!device.revokedAt) return new Response("Only revoked devices can be deleted", { status: 409 });
+
+    for (const entry of [...this.sessions.values()]) {
+      if (entry.deviceId === deviceId) {
+        this.removeSocketSession(entry.ws);
+        entry.ws.close(1008, "Device deleted");
+      }
+    }
+    await this.roomState.storage.delete(`device:${deviceId}`);
+    await this.roomState.storage.delete(`node:${device.nodeId}`);
     return new Response(null, { status: 303, headers: { location: "/auth/devices" } });
   }
 

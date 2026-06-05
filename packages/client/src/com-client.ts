@@ -198,6 +198,16 @@ export class RemoteComClient {
 
   updatePresence(updates: PresenceUpdates): void {
     this.requireConnected();
+    if (this.reconnectOptions) {
+      this.reconnectOptions = {
+        ...this.reconnectOptions,
+        session: {
+          ...this.reconnectOptions.session,
+          ...updates,
+          lastActivity: this.now(),
+        },
+      };
+    }
     this.sendRaw({ type: "presence", ...updates });
   }
 

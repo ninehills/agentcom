@@ -261,6 +261,15 @@ export function createHarness({ baseUrl, runId, logPath }) {
     return response;
   }
 
+  async function deleteDevice(deviceId, label = "device") {
+    const response = await http("POST", "/auth/delete", new URLSearchParams({ deviceId }), {
+      redirect: "manual",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+    });
+    assert(response.status === 303 || response.status === 404, `${label} delete expected 303/404 for ${deviceId}, got ${response.status}`);
+    return response;
+  }
+
   function assert(condition, message) {
     if (!condition) throw new Error(message);
   }
@@ -307,6 +316,7 @@ export function createHarness({ baseUrl, runId, logPath }) {
     signNonce,
     sessionRegistration,
     revokeDevice,
+    deleteDevice,
     toWsUrl: () => toWsUrl(baseUrl),
   };
 }
