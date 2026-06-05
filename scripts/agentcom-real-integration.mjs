@@ -2,6 +2,8 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { RemoteComClient } from "@agentcom/client/com-client";
+import { resolveTarget } from "@agentcom/protocol";
 
 const DEFAULT_BASE_URL = "https://agentcom-test.swulling.workers.dev";
 const baseUrl = normalizeBaseUrl(process.env.AGENTCOM_BASE_URL ?? process.argv[2] ?? DEFAULT_BASE_URL);
@@ -136,6 +138,59 @@ try {
     reconnect.close();
   });
 
+  const clientDevices = await step("RemoteComClient registers, reconnects, resolves, and sends through the real Worker", async () => {
+    const carol = remoteClient("carol");
+    const dave = remoteClient("dave");
+    try {
+      const [carolToken, daveToken] = await Promise.all([issueToken(), issueToken()]);
+      await Promise.all([
+        carol.connect({
+          deviceToken: carolToken,
+          hostname: `${context.hostnamePrefix}-client-carol.local`,
+          preferredNodeName: `${context.hostnamePrefix}-client-carol`,
+          session: sessionRegistration("client-carol"),
+        }),
+        dave.connect({
+          deviceToken: daveToken,
+          hostname: `${context.hostnamePrefix}-client-dave.local`,
+          preferredNodeName: `${context.hostnamePrefix}-client-dave`,
+          session: sessionRegistration("client-dave"),
+        }),
+      ]);
+
+      const sessions = await carol.listSessions();
+      const resolved = resolveTarget(sessions, `client-dave@${dave.nodeName}`);
+      assert(resolved.found, resolved.reason ?? "RemoteComClient could not resolve dave");
+      assert(resolved.sessionId === dave.sessionId, `RemoteComClient resolved ${resolved.sessionId}, expected ${dave.sessionId}`);
+
+      const incoming = onceRemoteMessage(dave);
+      const sent = await carol.send(resolved.sessionId, {
+        text: "hello from RemoteComClient real integration",
+        replyTo: `root-${runId}`,
+        expectsReply: true,
+        messageId: `m-client-${runId}`,
+      });
+      assert(sent.delivered, `RemoteComClient send failed: ${sent.reason}`);
+      const received = await incoming;
+      assert(received.from.address === `client-carol@${carol.nodeName}`, `RemoteComClient sender mismatch ${received.from.address}`);
+      assert(received.message.replyTo === `root-${runId}`, "RemoteComClient replyTo missing");
+      assert(received.message.expectsReply === true, "RemoteComClient expectsReply missing");
+      assert(received.message.content.text === "hello from RemoteComClient real integration", "RemoteComClient message text mismatch");
+
+      const credential = carol.credential;
+      assert(credential?.deviceId && credential.privateKeyJwk, "RemoteComClient did not expose generated credential");
+      carol.disconnect();
+      await carol.connect({ deviceId: credential.deviceId, privateKeyJwk: credential.privateKeyJwk, session: sessionRegistration("client-carol-reconnected") });
+      assert(carol.deviceId === credential.deviceId, "RemoteComClient reconnect device mismatch");
+      assert(carol.nodeId === credential.nodeId, "RemoteComClient reconnect node mismatch");
+
+      return [carol.credential?.deviceId, dave.credential?.deviceId].filter(Boolean);
+    } finally {
+      carol.disconnect();
+      dave.disconnect();
+    }
+  });
+
   await step("device management page includes hostname and ids", async () => {
     const response = await http("GET", "/auth/devices");
     assert(response.status === 200, `GET /auth/devices expected 200, got ${response.status}`);
@@ -167,6 +222,16 @@ try {
       headers: { "content-type": "application/x-www-form-urlencoded" },
     });
     assert(response.status === 303 || response.status === 404, `cleanup revoke expected 303/404, got ${response.status}`);
+  });
+
+  await step("cleanup RemoteComClient devices", async () => {
+    await Promise.all(clientDevices.map(async (deviceId) => {
+      const response = await http("POST", "/auth/revoke", new URLSearchParams({ deviceId }), {
+        redirect: "manual",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+      });
+      assert(response.status === 303 || response.status === 404, `client cleanup revoke expected 303/404 for ${deviceId}, got ${response.status}`);
+    }));
   });
 
   await log("run.pass", { logPath });
@@ -218,6 +283,30 @@ async function registerClient({ name, hostname, preferredNodeName }) {
   assert(register.nodeId?.startsWith("n-"), `invalid nodeId ${register.nodeId}`);
   assert(register.nodeName === preferredNodeName, `expected nodeName ${preferredNodeName}, got ${register.nodeName}`);
   return { socket, token, privateKey: keypair.privateKey, register };
+}
+
+function remoteClient(label) {
+  return new RemoteComClient({
+    serverUrl: toWsUrl(baseUrl),
+    autoReconnect: false,
+    requestTimeoutMs: 10_000,
+    sendAckTimeoutMs: 10_000,
+    webSocketFactory: () => connectWebSocket(`RemoteComClient:${label}`),
+  });
+}
+
+function onceRemoteMessage(client) {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      off();
+      reject(new Error("timed out waiting for RemoteComClient message"));
+    }, 10_000);
+    const off = client.onMessage((from, message) => {
+      clearTimeout(timeout);
+      off();
+      resolve({ from, message });
+    });
+  });
 }
 
 async function issueToken() {

@@ -1,4 +1,4 @@
-import type { AgentComMessage, SessionInfo, SessionRegistration } from "./types";
+import type { AgentComMessage, SessionInfo, SessionRegistration } from "./types.ts";
 
 export type AuthMessage =
   | {
