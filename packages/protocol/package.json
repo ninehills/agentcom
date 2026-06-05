@@ -1,9 +1,22 @@
 {
   "name": "@agentcom/protocol",
-  "version": "0.0.0",
+  "version": "0.1.0",
+  "license": "MIT",
   "type": "module",
-  "private": true,
   "exports": {
     ".": "./src/index.ts"
+  },
+  "files": [
+    "src/**/*.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ninehills/agentcom.git",
+    "directory": "packages/protocol"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

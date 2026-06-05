@@ -1,23 +1,39 @@
 {
   "name": "@agentcom/pi-agentcom",
-  "version": "0.0.0",
+  "version": "0.1.0",
+  "license": "MIT",
   "type": "module",
-  "private": true,
+  "main": "src/index.ts",
   "exports": {
     ".": "./src/index.ts",
     "./runtime": "./src/runtime.ts",
     "./reply-tracker": "./src/reply-tracker.ts"
   },
+  "files": [
+    "src/**/*.ts",
+    "README.md",
+    "LICENSE"
+  ],
   "keywords": [
-    "pi-package"
+    "pi-package",
+    "pi-agent",
+    "agentcom"
   ],
   "pi": {
     "extensions": [
       "./src/index.ts"
     ]
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ninehills/agentcom.git",
+    "directory": "packages/pi-agentcom"
+  },
   "dependencies": {
-    "@agentcom/client": "0.0.0",
-    "@agentcom/protocol": "0.0.0"
+    "@agentcom/client": "0.1.0",
+    "@agentcom/protocol": "0.1.0"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

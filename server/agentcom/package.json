@@ -4,6 +4,6 @@
   "type": "module",
   "private": true,
   "dependencies": {
-    "@agentcom/protocol": "0.0.0"
+    "@agentcom/protocol": "0.1.0"
   }
 }

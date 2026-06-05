@@ -1,8 +1,8 @@
 {
   "name": "@agentcom/client",
-  "version": "0.0.0",
+  "version": "0.1.0",
+  "license": "MIT",
   "type": "module",
-  "private": true,
   "exports": {
     ".": "./src/index.ts",
     "./com-client": "./src/com-client.ts",
@@ -10,7 +10,20 @@
     "./credentials": "./src/credentials.ts",
     "./crypto": "./src/crypto.ts"
   },
+  "files": [
+    "src/**/*.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ninehills/agentcom.git",
+    "directory": "packages/client"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "dependencies": {
-    "@agentcom/protocol": "0.0.0"
+    "@agentcom/protocol": "0.1.0"
   }
 }
