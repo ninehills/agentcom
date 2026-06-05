@@ -19,6 +19,8 @@
     "test:worker": "vitest run",
     "test:client": "vitest run --config vitest.node.config.ts",
     "typecheck": "tsc -b",
+    "publish:packages": "node scripts/publish-agentcom-packages.mjs",
+    "publish:packages:dry-run": "node scripts/publish-agentcom-packages.mjs --dry-run",
     "test:integration:real": "node scripts/agentcom-real-integration.mjs",
     "test:pi-extension": "node scripts/agentcom-pi-extension-smoke.mjs"
   },
