@@ -471,7 +471,7 @@ export class AgentComRuntime {
         content: formatIncomingContent(details),
         display: true,
         details,
-      }, deliverAs === "followUp" ? { deliverAs: "followUp" } : { triggerTurn: true });
+      }, deliverAs === "followUp" ? { deliverAs: "followUp", triggerTurn: true } : { triggerTurn: true });
       return;
     }
     ctx.ui?.notify?.(text, "info");

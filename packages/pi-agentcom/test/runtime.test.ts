@@ -138,6 +138,25 @@ describe("AgentComRuntime commands", () => {
     expect(customMessages.at(-1)?.message.content).toContain("agentcom tool");
   });
 
+  it("triggers a turn for follow-up custom incoming messages if the agent is idle by delivery time", async () => {
+    const { runtime, clients, ctx } = await setup();
+    const customMessages: Array<{ message: any; options: any }> = [];
+    await runtime.handleCommand("join wss://agentcom.example/ws com_dev_ok", ctx());
+    runtime.handleTurnStart(ctx({
+      isIdle: false,
+      sendMessage: (message, options) => customMessages.push({ message, options }),
+      injectMessage: vi.fn(),
+      ui: undefined,
+    }));
+
+    clients[0].emitMessage(bob, { id: "m-follow-up", timestamp: 6, expectsReply: true, content: { text: "hello" } });
+
+    expect(customMessages.at(-1)).toMatchObject({
+      message: { customType: "agentcom_message", content: expect.stringContaining("hello") },
+      options: { deliverAs: "followUp", triggerTurn: true },
+    });
+  });
+
   it("uses pi-intercom-style custom overlays for the empty /com panel", async () => {
     const { runtime, clients, ui, entries, ctx } = await setup({ customDraft: "from overlay" });
     await runtime.handleCommand("join wss://agentcom.example/ws com_dev_ok", ctx());
