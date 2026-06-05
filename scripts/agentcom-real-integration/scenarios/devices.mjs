@@ -7,6 +7,16 @@ export async function runDeviceManagementScenario(h, { alice, context }) {
     h.assert(response.body.includes(`${context.hostnamePrefix}-alice.local`), "devices page missing alice hostname");
     h.assert(response.body.includes("tester@example.com"), "devices page missing test email");
     h.assert(response.body.includes("Last seen"), "devices page missing Last seen label");
+    h.assert(response.body.includes("Sessions"), "devices page missing sessions section");
+    h.assert(response.body.includes(alice.register.sessionId), "devices page missing alice session id");
+    h.assert(response.body.includes("alice-updated"), "devices page missing alice session name");
+    h.assert(response.body.includes("CWD"), "devices page missing session cwd label");
+    h.assert(response.body.includes("Model"), "devices page missing session model label");
+    h.assert(response.body.includes("Runtime"), "devices page missing session runtime label");
+    h.assert(response.body.includes("PID"), "devices page missing session pid label");
+    h.assert(response.body.includes("Started at"), "devices page missing session startedAt label");
+    h.assert(response.body.includes("Last activity"), "devices page missing session lastActivity label");
+    h.assert(response.body.includes("Status"), "devices page missing session status label");
   });
 }
 

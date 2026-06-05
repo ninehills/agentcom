@@ -343,6 +343,7 @@ Access-authenticated browser request
   → revoked 行灰色显示
   → active 行提供 Revoke 表单按钮
   → revoked 行提供 Delete permanently 表单按钮
+  → 每个 device 行内展示该 device 当前在线 sessions 的完整 SessionInfo 字段
 ```
 
 规则：
@@ -350,6 +351,7 @@ Access-authenticated browser request
 - 用户只能查看自己邮箱注册的设备。
 - 不做 room 管理员任意撤销。
 - 撤销和删除前使用浏览器原生 confirm。
+- session 展示仅来自当前 DO 内存/hibernation attachment 中在线连接；离线 session 不保留。
 
 ### 9.3 `/auth/revoke`
 

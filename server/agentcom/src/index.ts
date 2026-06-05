@@ -319,6 +319,12 @@ export class ComRoom extends DurableObject<Env> {
     const devices = await this.roomState.storage.list<DeviceRecord>({ prefix: "device:" });
     const nodes = await this.roomState.storage.list<NodeRecord>({ prefix: "node:" });
     const nodesById = new Map([...nodes.values()].map((node) => [node.nodeId, node]));
+    const sessionsByDevice = new Map<string, SessionInfo[]>();
+    for (const entry of this.sessions.values()) {
+      const sessions = sessionsByDevice.get(entry.deviceId) ?? [];
+      sessions.push(entry.session);
+      sessionsByDevice.set(entry.deviceId, sessions);
+    }
     const visibleDevices = [...devices.values()]
       .filter((device) => device.email === email)
       .sort((a, b) => b.createdAt - a.createdAt);
@@ -332,6 +338,13 @@ export class ComRoom extends DurableObject<Env> {
         const action = device.revokedAt
           ? `<form method="post" action="/auth/delete"><input type="hidden" name="deviceId" value="${escapeHtml(device.deviceId)}"><button class="danger" type="submit" onclick="return confirm('Delete this revoked device permanently?')">Delete permanently</button></form>`
           : `<form method="post" action="/auth/revoke"><input type="hidden" name="deviceId" value="${escapeHtml(device.deviceId)}"><button type="submit" onclick="return confirm('Revoke this device?')">Revoke</button></form>`;
+        const sessions = (sessionsByDevice.get(device.deviceId) ?? []).sort((a, b) => b.lastActivity - a.lastActivity);
+        const sessionRows = sessions.length > 0
+          ? sessions.map((session) => `<article class="session-card">
+              <h3>${escapeHtml(session.name)} <code>${escapeHtml(session.id)}</code></h3>
+              <dl class="session-details">${renderSessionDetails(session)}</dl>
+            </article>`).join("")
+          : `<p class="no-sessions">No active sessions</p>`;
         return `<li data-device-id="${escapeHtml(device.deviceId)}" class="device-row ${status}">
           <div class="device-main"><strong>${escapeHtml(node?.nodeName ?? "unknown-node")}</strong><p>${escapeHtml(node?.hostname ?? "unknown hostname")}</p></div>
           <dl>
@@ -343,6 +356,10 @@ export class ComRoom extends DurableObject<Env> {
             ${revokedAt ? `<div><dt>Revoked</dt><dd>${escapeHtml(revokedAt)} UTC</dd></div>` : ""}
           </dl>
           <div class="device-actions"><span>${status}</span>${action}</div>
+          <section class="device-sessions" aria-label="Sessions for ${escapeHtml(device.deviceId)}">
+            <h2>Sessions (${sessions.length})</h2>
+            ${sessionRows}
+          </section>
         </li>`;
       })
       .join("");
@@ -358,6 +375,7 @@ export class ComRoom extends DurableObject<Env> {
       .empty { padding: 64px 32px; text-align: center; }
       .empty div { width: 72px; height: 72px; margin: 0 auto 20px; display: grid; place-items: center; border-radius: 24px; background: #15130f; color: #ffd166; font-size: 42px; }
       h2 { margin: 0 0 10px; font-size: 24px; letter-spacing: -.03em; }
+      h3 { margin: 0 0 12px; font-size: 15px; letter-spacing: -.02em; }
       p { margin: 0; color: #645b4d; line-height: 1.6; }
       code { padding: 2px 6px; border-radius: 8px; background: #eee5d4; color: #21180c; }
       ul { list-style: none; margin: 0; padding: 10px; }
@@ -373,9 +391,15 @@ export class ComRoom extends DurableObject<Env> {
       .device-actions { display: grid; gap: 10px; justify-items: end; }
       .device-row span { border-radius: 999px; padding: 6px 10px; background: #e7f8df; color: #315b23; font-size: 12px; font-weight: 800; text-transform: uppercase; }
       .device-row.revoked span { background: #ded8ce; color: #6f675d; }
+      .device-sessions { grid-column: 1 / -1; border-top: 1px solid #eee1cc; padding-top: 16px; }
+      .device-sessions h2 { font-size: 14px; margin-bottom: 12px; text-transform: uppercase; letter-spacing: .08em; color: #8a7d68; }
+      .session-card { border: 1px solid #eadfcf; border-radius: 16px; padding: 14px; background: rgba(255, 252, 245, .72); }
+      .session-card + .session-card { margin-top: 10px; }
+      .session-details { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .no-sessions { color: #8a7d68; font-size: 13px; }
       button { border: 0; border-radius: 999px; padding: 9px 14px; background: #15130f; color: #fffaf0; font-weight: 800; cursor: pointer; }
       button.danger { background: #8a241f; }
-      @media (max-width: 760px) { body { place-items: start center; } main { margin: 24px auto; } .device-row, dl { grid-template-columns: 1fr; } .device-actions { justify-items: start; } }
+      @media (max-width: 760px) { body { place-items: start center; } main { margin: 24px auto; } .device-row, dl, .session-details { grid-template-columns: 1fr; } .device-actions { justify-items: start; } }
     </style></head><body><main><header><p class="eyebrow">agentcom devices</p><h1>Registered devices</h1></header><div class="panel">${rows ? `<ul>${content}</ul>` : content}</div></main></body></html>`;
     return new Response(html, { headers: { "content-type": "text/html; charset=utf-8" } });
   }
@@ -562,6 +586,31 @@ function isValidMessage(value: unknown): value is AgentComMessage {
     isRecord(value.content) &&
     typeof value.content.text === "string"
   );
+}
+
+function renderSessionDetails(session: SessionInfo): string {
+  const fields: Array<[string, string | number | undefined]> = [
+    ["Session ID", session.id],
+    ["Name", session.name],
+    ["Node ID", session.nodeId],
+    ["Node name", session.nodeName],
+    ["Address", session.address],
+    ["CWD", session.cwd],
+    ["Model", session.model],
+    ["Runtime", session.runtime],
+    ["PID", session.pid],
+    ["Started at", session.startedAt],
+    ["Last activity", session.lastActivity],
+    ["Status", session.status],
+  ];
+  return fields
+    .map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(formatSessionField(value))}</dd></div>`)
+    .join("");
+}
+
+function formatSessionField(value: string | number | undefined): string {
+  if (value === undefined) return "—";
+  return String(value);
 }
 
 function escapeHtml(input: string): string {

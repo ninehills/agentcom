@@ -375,7 +375,8 @@ open https://agentcom.swulling.workers.dev/auth/devices
 2. 登录后回到 `/auth/devices`。
 3. 页面标题为 `Registered devices`。
 4. 已注册设备展示 nodeName、hostname、deviceId、nodeId、email、created、last seen、revoked 状态。
-5. active 设备显示 `Revoke`；revoked 设备显示 `Delete permanently`。
+5. 每个设备展示当前在线 sessions，包含 Session ID、Name、Node ID、Node name、Address、CWD、Model、Runtime、PID、Started at、Last activity、Status。
+6. active 设备显示 `Revoke`；revoked 设备显示 `Delete permanently`。
 
 获取 token 并手动注册设备：
 

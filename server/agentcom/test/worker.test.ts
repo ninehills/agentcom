@@ -130,6 +130,19 @@ describe("agentcom Worker", () => {
 
   it("shows, revokes, and deletes the current user's revoked devices", async () => {
     const client = await registerClient({ name: "device", hostname: "device-box" });
+    const reconnect = await connectWebSocket();
+
+    reconnect.send(JSON.stringify({ type: "auth_begin", requestId: "req-device-page-begin", deviceId: client.message.deviceId }));
+    const challenge = await nextJson(reconnect);
+    reconnect.send(JSON.stringify({
+      type: "auth_finish",
+      requestId: "req-device-page-finish",
+      deviceId: client.message.deviceId,
+      signature: await signNonce(client.privateKey, challenge.nonce),
+      session: sessionRegistration("device-reconnected"),
+    }));
+    const reconnected = await nextJson(reconnect);
+    expect(reconnected).toMatchObject({ type: "register_ok", deviceId: client.message.deviceId });
 
     const devices = await fetchWorker("https://agentcom.example/auth/devices");
     expect(devices.status).toBe(200);
@@ -140,6 +153,27 @@ describe("agentcom Worker", () => {
     expect(html).toContain("tester@example.com");
     expect(html).toContain("Last seen");
     expect(html).toContain("Revoke");
+    expect(html).toContain("Sessions (2)");
+    expect(html).toContain("Session ID");
+    expect(html).toContain(client.message.sessionId);
+    expect(html).toContain(reconnected.sessionId);
+    expect(html).toContain("Name");
+    expect(html).toContain("device-reconnected");
+    expect(html).toContain("Node name");
+    expect(html).toContain("Address");
+    expect(html).toContain("device-reconnected@device-box");
+    expect(html).toContain("CWD");
+    expect(html).toContain("/repo");
+    expect(html).toContain("Model");
+    expect(html).toContain("test-model");
+    expect(html).toContain("Runtime");
+    expect(html).toContain("pi");
+    expect(html).toContain("PID");
+    expect(html).toContain("123");
+    expect(html).toContain("Started at");
+    expect(html).toContain("Last activity");
+    expect(html).toContain("Status");
+    expect(html).toContain("idle");
 
     const activeDelete = await fetchWorker("https://agentcom.example/auth/delete", {
       method: "POST",
