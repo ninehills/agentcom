@@ -37,9 +37,15 @@ Create a production Worker config from the checked-in test config:
 cp server/agentcom/wrangler.test.toml server/agentcom/wrangler.toml
 ```
 
-Edit `server/agentcom/wrangler.toml`; at this point, keep the Cloudflare Access values as placeholders:
+Edit `server/agentcom/wrangler.toml`:
+
+1. Change `name` from `"agentcom-test"` to `"agentcom"` (or your preferred Worker name).
+2. Keep the Cloudflare Access values as placeholders for now:
 
 ```toml
+name = "agentcom"
+# ...
+
 [vars]
 TEAM_DOMAIN = "https://<your-team>.cloudflareaccess.com"
 POLICY_AUD = "<Cloudflare Access Application Audience AUD Tag>"
@@ -88,7 +94,7 @@ Finally, find the Team domain and AUD tag from these two places:
 
 ![AUD tag](image-5.png)
 
-Edit `server/agentcom/wrangler.toml` with the values:
+Edit `server/agentcom/wrangler.toml` with the real values:
 
 ```toml
 [vars]

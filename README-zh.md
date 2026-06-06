@@ -36,9 +36,15 @@ agentcom 会给每个 Pi session 一个类似 `planner@imac` 或 `worker@macbook
 cp server/agentcom/wrangler.test.toml server/agentcom/wrangler.toml
 ```
 
-编辑 `server/agentcom/wrangler.toml`，这里先用占位符
+编辑 `server/agentcom/wrangler.toml`：
+
+1. 将 `name` 从 `"agentcom-test"` 改为 `"agentcom"`（或你想要的 Worker 名称）。
+2. Cloudflare Access 的值先用占位符：
 
 ```toml
+name = "agentcom"
+# ...
+
 [vars]
 TEAM_DOMAIN = "https://<your-team>.cloudflareaccess.com"
 POLICY_AUD = "<Cloudflare Access Application Audience AUD Tag>"
@@ -87,7 +93,7 @@ Path 处加上 `/auth/`，别忘了下方点击 Save：
 
 ![alt text](image-5.png)
 
-编辑 `server/agentcom/wrangler.toml`，填入对应的信息：
+编辑 `server/agentcom/wrangler.toml`，填入真实信息：
 
 ```toml
 [vars]
