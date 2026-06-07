@@ -101,8 +101,8 @@ export default function agentcomExtension(pi: any) {
       "Use com when the user asks to communicate with remote agentcom sessions, send a message, ask for a reply, or reply to an agentcom ask.",
     ],
     parameters: comToolParameters,
-    async execute(_toolCallId: string, params: ComToolParams, _signal: AbortSignal, _onUpdate: unknown, ctx: any) {
-      const result = await runtime.handleTool(params, toCtx(ctx));
+    async execute(_toolCallId: string, params: ComToolParams, signal: AbortSignal, _onUpdate: unknown, ctx: any) {
+      const result = await runtime.handleTool(params, toCtx(ctx), signal);
       return {
         content: [{ type: "text", text: result.text }],
         details: result.details,

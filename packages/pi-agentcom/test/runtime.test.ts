@@ -229,6 +229,19 @@ describe("AgentComRuntime commands", () => {
     await expect(runtime.handleCommand("pending", ctx())).resolves.toBe("No pending asks.");
   });
 
+  it("cancels tool asks through AbortSignal and clears pending state", async () => {
+    const { runtime, clients, ctx } = await setup();
+    await runtime.handleCommand("join wss://agentcom.example/ws com_dev_ok", ctx());
+    const controller = new AbortController();
+
+    const askPromise = runtime.handleTool({ action: "ask", to: "bob", message: "still there?" }, ctx({ askTimeoutMs: 1_000 }), controller.signal);
+    await vi.waitFor(() => expect(clients[0].sent.at(-1)?.options.messageId).toBe("m-fixed"));
+    controller.abort();
+
+    await expect(askPromise).resolves.toMatchObject({ ok: false, text: "Cancelled" });
+    await expect(runtime.handleCommand("pending", ctx())).resolves.toBe("No pending asks.");
+  });
+
   it("uses pi-intercom-style custom overlays for the empty /com panel", async () => {
     const { runtime, clients, ui, entries, ctx } = await setup({ customDraft: "from overlay" });
     await runtime.handleCommand("join wss://agentcom.example/ws com_dev_ok", ctx());

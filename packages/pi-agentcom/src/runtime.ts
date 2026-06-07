@@ -172,7 +172,7 @@ export class AgentComRuntime {
     }
   }
 
-  async handleTool(params: ComToolParams, ctx: AgentComContext): Promise<{ ok: boolean; text: string; details?: unknown }> {
+  async handleTool(params: ComToolParams, ctx: AgentComContext, signal?: AbortSignal): Promise<{ ok: boolean; text: string; details?: unknown }> {
     this.latestCtx = ctx;
     this.config = await loadConfig(this.paths) as AgentComConfig & { enabled?: boolean };
     try {
@@ -181,7 +181,7 @@ export class AgentComRuntime {
       switch (params.action) {
         case "list": result = ok(await this.list()); break;
         case "send": result = await this.sendToResult(params.to, message, params.attachments, ctx, params.replyTo); break;
-        case "ask": result = await this.askResult(params.to, message, ctx, params.attachments); break;
+        case "ask": result = await this.askResult(params.to, message, ctx, params.attachments, signal); break;
         case "reply": result = await this.replyResult(message, params.replyTo, params.to); break;
         case "pending": result = ok(await this.pending()); break;
         case "status": result = ok(await this.status()); break;
@@ -276,10 +276,11 @@ export class AgentComRuntime {
     return (await this.askResult(target, text, ctx, attachments)).text;
   }
 
-  private async askResult(target: string | undefined, text: string, ctx: AgentComContext, attachments?: Attachment[]): Promise<ActionResult> {
+  private async askResult(target: string | undefined, text: string, ctx: AgentComContext, attachments?: Attachment[], signal?: AbortSignal): Promise<ActionResult> {
     if (!target) return fail("Usage: /com ask <target> <message>");
     if (!text) return fail("Missing message.");
     if ([...this.outgoingAsks.values()].some((ask) => ask.status === "waiting")) return fail("Already waiting for a reply");
+    if (signal?.aborted) return fail("Cancelled");
     const client = this.requireConnected();
     this.syncCurrentPresence(ctx);
     const sessions = await client.listSessions();
@@ -288,17 +289,25 @@ export class AgentComRuntime {
     if (resolved.sessionId === client.sessionId) return fail("Cannot message the current session");
     const messageId = `m-${this.randomId()}`;
     let timeout: ReturnType<typeof setTimeout> | null = null;
+    let onAbort: (() => void) | null = null;
     const clearPendingAsk = () => {
       if (timeout) clearTimeout(timeout);
       timeout = null;
+      if (onAbort) signal?.removeEventListener("abort", onAbort);
+      onAbort = null;
       this.outgoingAsks.delete(messageId);
     };
-    const replyPromise = new Promise<AgentComMessage | null>((resolve) => {
+    const replyPromise = new Promise<{ type: "reply"; message: AgentComMessage } | { type: "timeout" } | { type: "cancelled" }>((resolve) => {
+      onAbort = () => {
+        clearPendingAsk();
+        resolve({ type: "cancelled" });
+      };
+      signal?.addEventListener("abort", onAbort, { once: true });
       timeout = setTimeout(() => {
         const ask = this.outgoingAsks.get(messageId);
         if (ask) ask.status = "timed_out";
         clearPendingAsk();
-        resolve(null);
+        resolve({ type: "timeout" });
       }, ctx.askTimeoutMs ?? 10 * 60 * 1000);
       this.outgoingAsks.set(messageId, {
         to: target,
@@ -308,7 +317,7 @@ export class AgentComRuntime {
         status: "waiting",
         resolve: (message) => {
           clearPendingAsk();
-          resolve(message);
+          resolve({ type: "reply", message });
         },
       });
     });
@@ -325,9 +334,11 @@ export class AgentComRuntime {
     }
     ctx.appendEntry?.("agentcom_sent", { to: target, message: { text, attachments, expectsReply: true }, messageId: ack.id, timestamp: this.now() });
     const reply = await replyPromise;
-    if (!reply) return fail(`ask delivered but timed out waiting for reply (${messageId})`, { delivered: true, timedOut: true, messageId });
-    ctx.appendEntry?.("agentcom_received", { from: target, message: { text: reply.content.text, attachments: reply.content.attachments }, messageId: reply.id, timestamp: reply.timestamp });
-    return ok(`**Reply from ${target}:**\n${reply.content.text}${formatAttachments(reply.content.attachments)}`, { delivered: true, messageId, replyId: reply.id });
+    if (reply.type === "cancelled") return fail("Cancelled", { delivered: true, cancelled: true, messageId });
+    if (reply.type === "timeout") return fail(`ask delivered but timed out waiting for reply (${messageId})`, { delivered: true, timedOut: true, messageId });
+    const message = reply.message;
+    ctx.appendEntry?.("agentcom_received", { from: target, message: { text: message.content.text, attachments: message.content.attachments }, messageId: message.id, timestamp: message.timestamp });
+    return ok(`**Reply from ${target}:**\n${message.content.text}${formatAttachments(message.content.attachments)}`, { delivered: true, messageId, replyId: message.id });
   }
 
   private async reply(text: string, replyTo?: string, to?: string): Promise<string> {
