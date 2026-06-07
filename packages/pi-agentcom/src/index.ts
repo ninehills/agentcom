@@ -1,6 +1,6 @@
 import { AgentComRuntime, type AgentComContext, type ComToolParams } from "./runtime.ts";
 import { InlineMessageComponent, type InlineMessageDetails } from "./ui/inline-message.ts";
-import { visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { wrapTextWithAnsi } from "@earendil-works/pi-tui";
 
 const comToolParameters = {
   type: "object",
