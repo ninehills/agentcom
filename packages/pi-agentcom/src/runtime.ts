@@ -243,7 +243,7 @@ export class AgentComRuntime {
     const client = this.requireConnected();
     const sessions = await client.listSessions();
     if (sessions.length === 0) return "No online sessions.";
-    return sessions.map(formatSession).join("\n");
+    return formatSessionList(sessions, client.sessionId, this.latestCtx?.cwd);
   }
 
   private async sendCommand(rest: string, ctx: AgentComContext): Promise<string> {
@@ -385,7 +385,7 @@ export class AgentComRuntime {
       `server: ${serverUrl}`,
       `node: ${this.client?.nodeName ?? "not joined"}`,
       `session: ${this.client?.sessionId ?? "not connected"}`,
-      `connected: ${connected}`,
+      `connected: ${connected ? "yes" : "no"}`,
       `online sessions: ${count}`,
     ].join("\n");
   }
@@ -599,8 +599,23 @@ function splitN(input: string, count: 2): string[] {
   return [trimmed];
 }
 
-function formatSession(session: SessionInfo): string {
-  return `${session.address} id=${session.id} node=${session.nodeName} cwd=${session.cwd} runtime=${session.runtime} status=${session.status ?? "unknown"} model=${session.model}`;
+function formatSessionList(sessions: SessionInfo[], currentSessionId?: string | null, currentCwd?: string): string {
+  const current = currentSessionId ? sessions.find((session) => session.id === currentSessionId) : undefined;
+  const others = sessions.filter((session) => session.id !== currentSessionId);
+  if (!current) return [`Online sessions:`, ...sessions.map((session) => formatSessionRow(session, currentCwd, false))].join("\n");
+  return [
+    `Current session:`,
+    formatSessionRow(current, currentCwd, true),
+    `Other sessions:`,
+    ...(others.length > 0 ? others.map((session) => formatSessionRow(session, currentCwd, false)) : ["No other sessions connected."]),
+  ].join("\n");
+}
+
+function formatSessionRow(session: SessionInfo, currentCwd: string | undefined, isSelf: boolean): string {
+  const tags = [isSelf ? "self" : undefined, currentCwd && session.cwd === currentCwd ? "same cwd" : undefined, session.status ?? "unknown"]
+    .filter((tag): tag is string => Boolean(tag));
+  const suffix = tags.length ? ` [${tags.join(", ")}]` : "";
+  return `• ${session.address} (${session.id}) — ${session.cwd} • ${session.runtime} • ${session.model}${suffix}`;
 }
 
 function formatIncomingContent(details: InlineMessageDetails): string {

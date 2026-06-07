@@ -40,7 +40,9 @@ describe("AgentComRuntime commands", () => {
     await expect(runtime.handleCommand("send bob hello world", ctx())).resolves.toContain("Message sent");
     expect(clients[0].sent.at(-1)).toMatchObject({ to: "s-bob", options: { text: "hello world" } });
 
-    await expect(runtime.handleCommand("status", ctx())).resolves.toContain("online sessions: 2");
+    const status = await runtime.handleCommand("status", ctx());
+    expect(status).toContain("connected: yes");
+    expect(status).toContain("online sessions: 2");
     await expect(runtime.handleCommand("rename New Node", ctx())).resolves.toContain("new-node");
     await expect(runtime.handleCommand("leave", ctx())).resolves.toContain("left");
 
@@ -57,6 +59,10 @@ describe("AgentComRuntime commands", () => {
     const list = await runtime.handleCommand("list", ctx({ sessionName: "hello" }));
 
     expect(clients[0].presenceUpdates.at(-1)).toMatchObject({ name: "hello", model: "test-model", status: "idle" });
+    expect(list).toContain("Current session:");
+    expect(list).toContain("• hello@test-node (s-self)");
+    expect(list).toContain("Other sessions:");
+    expect(list).toContain("• bob@devbox (s-bob)");
     expect(list).toContain("hello@test-node");
   });
 
