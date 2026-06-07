@@ -47,7 +47,7 @@ export default function agentcomExtension(pi: any) {
     presenceTimer = setInterval(() => {
       if (!latestPiCtx) return;
       runtime.syncCurrentPresence(toCtx(latestPiCtx));
-    }, 1_000);
+    }, 5_000);
     (presenceTimer as { unref?: () => void }).unref?.();
   };
 
@@ -71,6 +71,13 @@ export default function agentcomExtension(pi: any) {
     runtime.handleTurnStart(currentCtx);
   });
   pi.on("turn_end", () => runtime.handleTurnEnd());
+  pi.on("agent_start", (_event: unknown, ctx: any) => runtime.handleAgentStart(toCtx(ctx)));
+  pi.on("agent_end", (_event: unknown, ctx: any) => runtime.handleAgentEnd(toCtx(ctx)));
+  pi.on("tool_execution_start", (event: { name?: string; toolName?: string; tool?: { name?: string } }, ctx: any) => {
+    runtime.handleToolStart(toCtx(ctx), event.tool?.name ?? event.toolName ?? event.name ?? "unknown");
+  });
+  pi.on("tool_execution_end", (_event: unknown, ctx: any) => runtime.handleToolEnd(toCtx(ctx)));
+  pi.on("model_select", (_event: unknown, ctx: any) => runtime.syncCurrentPresence(toCtx(ctx)));
   pi.on("session_shutdown", () => {
     stopPresencePolling();
     runtime.shutdown();

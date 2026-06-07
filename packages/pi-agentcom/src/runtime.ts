@@ -100,6 +100,7 @@ export class AgentComRuntime {
   private latestCtx: AgentComContext | null = null;
   private runtimeGeneration = 0;
   private lastPresenceKey: string | null = null;
+  private activityStatus: string | null = null;
   private readonly replyTracker: ReplyTracker;
   private readonly outgoingAsks = new Map<string, OutgoingAsk>();
   private readonly pendingIncomingMessages: PendingIncomingMessage[] = [];
@@ -159,6 +160,26 @@ export class AgentComRuntime {
   handleTurnEnd(): void {
     this.replyTracker.endTurn();
     if (this.latestCtx) this.flushPendingIncoming({ ...this.latestCtx, isIdle: true });
+  }
+
+  handleAgentStart(ctx: AgentComContext): void {
+    this.activityStatus = "thinking";
+    this.syncCurrentPresence(ctx);
+  }
+
+  handleAgentEnd(ctx: AgentComContext): void {
+    this.activityStatus = null;
+    this.syncCurrentPresence({ ...ctx, isIdle: true });
+  }
+
+  handleToolStart(ctx: AgentComContext, toolName: string): void {
+    this.activityStatus = `tool:${toolName || "unknown"}`;
+    this.syncCurrentPresence(ctx);
+  }
+
+  handleToolEnd(ctx: AgentComContext): void {
+    this.activityStatus = "thinking";
+    this.syncCurrentPresence(ctx);
   }
 
   async handleCommand(args: string, ctx: AgentComContext): Promise<string> {
@@ -494,7 +515,7 @@ export class AgentComRuntime {
     this.client.updatePresence({
       name: ctx.sessionName?.trim() ?? "",
       model: ctx.model ?? "unknown",
-      status: ctx.isIdle === false ? "working" : "idle",
+      status: this.presenceStatus(ctx),
     });
     this.lastPresenceKey = key;
   }
@@ -579,8 +600,12 @@ export class AgentComRuntime {
     return JSON.stringify({
       name: ctx.sessionName?.trim() ?? "",
       model: ctx.model ?? "unknown",
-      status: ctx.isIdle === false ? "working" : "idle",
+      status: this.presenceStatus(ctx),
     });
+  }
+
+  private presenceStatus(ctx: AgentComContext): string {
+    return this.activityStatus ?? (ctx.isIdle === false ? "working" : "idle");
   }
 
   private async saveConfig(config: AgentComConfig & { enabled?: boolean }): Promise<void> {

@@ -66,6 +66,23 @@ describe("AgentComRuntime commands", () => {
     expect(list).toContain("hello@test-node");
   });
 
+  it("updates presence from agent and tool lifecycle events", async () => {
+    const { runtime, clients, ctx } = await setup();
+    await runtime.handleCommand("join wss://agentcom.example/ws com_dev_ok", ctx());
+
+    runtime.handleAgentStart(ctx());
+    expect(clients[0].presenceUpdates.at(-1)).toMatchObject({ status: "thinking" });
+
+    runtime.handleToolStart(ctx(), "com");
+    expect(clients[0].presenceUpdates.at(-1)).toMatchObject({ status: "tool:com" });
+
+    runtime.handleToolEnd(ctx());
+    expect(clients[0].presenceUpdates.at(-1)).toMatchObject({ status: "thinking" });
+
+    runtime.handleAgentEnd(ctx());
+    expect(clients[0].presenceUpdates.at(-1)).toMatchObject({ status: "idle" });
+  });
+
   it("auto-connects only the configured serverUrl credential on startup", async () => {
     const { runtime, clients, paths, ctx } = await setup();
     await saveConfig({ serverUrl: "wss://configured.example/ws", autoJoin: true }, paths);
