@@ -269,6 +269,43 @@ describe("AgentComRuntime commands", () => {
     expect(entries.at(-1)).toMatchObject({ type: "agentcom_sent", details: { to: "bob@devbox", message: { text: "from overlay" } } });
   });
 
+  it("stops stale overlay flows after shutdown", async () => {
+    const { runtime, clients, entries, ctx } = await setup();
+    await runtime.handleCommand("join wss://agentcom.example/ws com_dev_ok", ctx());
+    clients[0].sessions = [session({ id: "s-self", name: "pi-main", nodeName: "test-node" }), bob];
+    let customCalls = 0;
+
+    const result = await runtime.handleCommand("", ctx({
+      hasUI: true,
+      ui: {
+        async custom<T>() {
+          customCalls += 1;
+          if (customCalls === 1) {
+            runtime.shutdown();
+            return bob as T;
+          }
+          return { sent: true, messageId: "m-stale", text: "stale" } as T;
+        },
+      },
+    }));
+
+    expect(result).toBe("No message sent.");
+    expect(customCalls).toBe(1);
+    expect(entries).not.toContainEqual(expect.objectContaining({ type: "agentcom_sent" }));
+  });
+
+  it("cancels pending asks on shutdown", async () => {
+    const { runtime, clients, ctx } = await setup();
+    await runtime.handleCommand("join wss://agentcom.example/ws com_dev_ok", ctx());
+
+    const askPromise = runtime.handleTool({ action: "ask", to: "bob", message: "still there?" }, ctx({ askTimeoutMs: 1_000 }));
+    await vi.waitFor(() => expect(clients[0].sent.at(-1)?.options.messageId).toBe("m-fixed"));
+    runtime.shutdown();
+
+    await expect(askPromise).resolves.toMatchObject({ ok: false, text: "Cancelled" });
+    await expect(runtime.handleCommand("pending", ctx())).resolves.toBe("No pending asks.");
+  });
+
   it("blocks self-target sends and a second ask while waiting", async () => {
     const { runtime, clients, ctx } = await setup();
     await runtime.handleCommand("join wss://agentcom.example/ws com_dev_ok", ctx());

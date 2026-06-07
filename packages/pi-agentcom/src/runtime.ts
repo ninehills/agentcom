@@ -72,6 +72,7 @@ interface OutgoingAsk {
   text: string;
   status: "waiting" | "answered" | "timed_out";
   resolve: (message: AgentComMessage) => void;
+  cancel: () => void;
 }
 
 interface ActionResult {
@@ -97,6 +98,7 @@ export class AgentComRuntime {
   private clientServerUrl: string | null = null;
   private unsubscribeMessage: (() => void) | null = null;
   private latestCtx: AgentComContext | null = null;
+  private runtimeGeneration = 0;
   private lastPresenceKey: string | null = null;
   private readonly replyTracker: ReplyTracker;
   private readonly outgoingAsks = new Map<string, OutgoingAsk>();
@@ -113,6 +115,7 @@ export class AgentComRuntime {
 
   async start(ctx: AgentComContext): Promise<string> {
     this.latestCtx = ctx;
+    this.runtimeGeneration += 1;
     this.config = await loadConfig(this.paths) as AgentComConfig & { enabled?: boolean };
     if (this.config.enabled === false || this.config.autoJoin === false) return "agentcom disabled";
     if (!this.config.serverUrl) return "agentcom not configured";
@@ -137,6 +140,8 @@ export class AgentComRuntime {
   }
 
   shutdown(): void {
+    this.runtimeGeneration += 1;
+    this.cancelOutgoingAsks();
     this.unsubscribeMessage?.();
     this.unsubscribeMessage = null;
     this.client?.disconnect();
@@ -224,6 +229,8 @@ export class AgentComRuntime {
     if (!rawServerUrl || !deviceToken) return "Usage: /com join <ws_url> <device_token>";
     const serverUrl = normalizeServerUrl(rawServerUrl);
     this.client?.disconnect();
+    this.runtimeGeneration += 1;
+    this.cancelOutgoingAsks();
     const client = this.getClient(serverUrl, this.clientServerUrl !== serverUrl);
     await this.saveConfig({ ...this.config, serverUrl });
     await client.connect({
@@ -328,6 +335,10 @@ export class AgentComRuntime {
           clearPendingAsk();
           resolve({ type: "reply", message });
         },
+        cancel: () => {
+          clearPendingAsk();
+          resolve({ type: "cancelled" });
+        },
       });
     });
     let ack: SendResult;
@@ -400,6 +411,8 @@ export class AgentComRuntime {
 
   private async leave(): Promise<string> {
     const serverUrl = this.config.serverUrl;
+    this.runtimeGeneration += 1;
+    this.cancelOutgoingAsks();
     this.client?.disconnect();
     this.client = null;
     this.clientServerUrl = null;
@@ -435,16 +448,19 @@ export class AgentComRuntime {
   }
 
   private async panelOverlay(ctx: AgentComContext, client: ClientLike, currentSession: SessionInfo, sessions: SessionInfo[]): Promise<string> {
+    const generation = this.runtimeGeneration;
     const selectedSession = await ctx.ui?.custom?.<SessionInfo | undefined>(
       (_tui, theme, keybindings, done) => new SessionListOverlay(defaultTheme(theme), defaultKeybindings(keybindings), currentSession, sessions, done),
       { overlay: true },
     ).catch(() => undefined);
+    if (!this.isLiveGeneration(generation)) return "No message sent.";
     if (!selectedSession) return "No target selected.";
 
     const result = await ctx.ui?.custom?.<ComposeResult>(
       (tui, theme, keybindings, done) => new ComposeOverlay(tui, theme, keybindings, selectedSession, sessionDisplayName(selectedSession), client, done),
       { overlay: true },
     ).catch(() => undefined);
+    if (!this.isLiveGeneration(generation)) return "No message sent.";
 
     if (!result?.sent || !result.messageId || !result.text) return "No message sent.";
     ctx.appendEntry?.("agentcom_sent", {
@@ -455,6 +471,14 @@ export class AgentComRuntime {
     });
     ctx.ui?.notify?.(`Message sent to ${sessionDisplayName(selectedSession)}`, "info");
     return `Message sent to ${sessionDisplayName(selectedSession)}`;
+  }
+
+  private isLiveGeneration(generation: number): boolean {
+    return this.runtimeGeneration === generation && Boolean(this.client?.isConnected());
+  }
+
+  private cancelOutgoingAsks(): void {
+    for (const ask of [...this.outgoingAsks.values()]) ask.cancel();
   }
 
   private attachClient(client: ClientLike): void {
