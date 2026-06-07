@@ -128,10 +128,18 @@ export default function agentcomExtension(pi: any) {
       if (messagePreview) text += "\n  " + theme.fg("dim", messagePreview);
       return new TextComponent(text);
     },
-    renderResult(result: { content?: Array<{ type: string; text?: string }>; details?: unknown }, context: { isPartial?: boolean }, theme: ThemeLike, renderContext: { isError?: boolean; expanded?: boolean }) {
+    renderResult(result: { content?: Array<{ type: string; text?: string }>; details?: unknown; isError?: boolean }, context: { isPartial?: boolean }, theme: ThemeLike, renderContext: { isError?: boolean; expanded?: boolean }) {
       if (context.isPartial) return new TextComponent(theme.fg("warning", "AgentCom working..."));
-      const details = result.details as { delivered?: boolean; error?: boolean; messageId?: string; reason?: string } | undefined;
-      const failed = Boolean(renderContext.isError || details?.error === true || details?.delivered === false);
+      const details = result.details as { delivered?: boolean; error?: boolean; ok?: boolean; cancelled?: boolean; timedOut?: boolean; messageId?: string; reason?: string } | undefined;
+      const failed = Boolean(
+        renderContext.isError
+        || result.isError === true
+        || details?.ok === false
+        || details?.error === true
+        || details?.cancelled === true
+        || details?.timedOut === true
+        || details?.delivered === false,
+      );
       let text = failed ? theme.fg("error", "✗ ") : theme.fg("success", "✓ ");
       text += theme.fg(failed ? "error" : "text", firstTextContent(result));
       if (details?.messageId && !renderContext.expanded) text += theme.fg("dim", ` (${details.messageId.slice(0, 8)})`);
@@ -168,7 +176,12 @@ interface ThemeLike {
 }
 
 class TextComponent {
-  constructor(private readonly text: string) {}
+  private readonly text: string;
+
+  constructor(text: string) {
+    this.text = text;
+  }
+
   invalidate(): void {}
   render(width?: number): string[] {
     const maxWidth = typeof width === "number" && Number.isFinite(width) ? Math.max(1, Math.floor(width)) : undefined;

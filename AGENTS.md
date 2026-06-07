@@ -12,6 +12,20 @@ Issue 使用 GitHub Issues，仓库为 `ninehills/agentcom`。见 `docs/agents/i
 
 仓库根目录只保留一个 `CONTEXT.md` 加 `docs/adr/`。见 `docs/agents/domain.md`。
 
+## 验证要求
+
+任何功能修改或 bugfix 完成前，必须跑完整验证，不允许只跑单元测试就声称完成：
+
+1. `npm run typecheck`
+2. `npm test`
+3. `npm run test:pi-extension`
+4. `npx wrangler deploy --config server/agentcom/wrangler.test.toml`
+5. `npm run test:integration:real`
+
+`test:integration:real` 是真实 HTTP + WebSocket + Pi Runtime e2e，覆盖 Worker、`RemoteComClient`、`AgentComRuntime` 的 join/list/send/ask/reply/panel-send 和设备管理。凡是通信、Worker、Pi 扩展、tool/command 行为相关改动，都必须以它通过作为最终验收。
+
+如果由于网络、Cloudflare 登录、权限或外部服务问题无法运行完整验证，必须明确说明阻塞原因、已完成的验证命令和未覆盖风险；不能把未跑真实 e2e 的结果说成完成。
+
 ## 项目文档索引
 
 - `CONTEXT.md`：领域语言，包含房间、设备、节点、会话等术语。

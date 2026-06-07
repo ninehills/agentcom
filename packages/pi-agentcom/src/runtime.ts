@@ -222,9 +222,9 @@ export class AgentComRuntime {
         case "status": result = ok(await this.status()); break;
         default: result = fail(`Unknown com action: ${(params as { action: string }).action}`);
       }
-      return { ok: result.ok, text: result.text, details: { action: params.action, ...result.details } };
+      return { ok: result.ok, text: result.text, details: { action: params.action, ok: result.ok, error: !result.ok, ...result.details } };
     } catch (error) {
-      return { ok: false, text: this.userError(error) };
+      return { ok: false, text: this.userError(error), details: { action: params.action, ok: false, error: true } };
     }
   }
 

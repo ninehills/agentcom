@@ -18,7 +18,7 @@ export async function runPiRuntimeScenario(h) {
     h.assert(list.includes(bobAddress), `pi list missing bob ${bobAddress}: ${list}`);
 
     const sent = await aliceRuntime.runtime.handleCommand(`send ${bobAddress} hello from pi runtime`, h.runtimeCtx("pi-alice", aliceUi));
-    h.assert(sent.includes("delivered"), `pi send failed: ${sent}`);
+    h.assert(sent.includes("Message sent"), `pi send failed: ${sent}`);
     await h.waitFor(() => bobUi.messages.join("\n").includes("hello from pi runtime"), "bob UI did not render pi runtime message");
 
     const askPromise = aliceRuntime.runtime.handleCommand(`ask ${bobAddress} can runtime reply?`, h.runtimeCtx("pi-alice", aliceUi, 10_000));
@@ -27,14 +27,14 @@ export async function runPiRuntimeScenario(h) {
       return pending.includes("can runtime reply?");
     }, "bob pending did not include pi runtime ask");
     const reply = await bobRuntime.runtime.handleCommand("reply yes from pi runtime", h.runtimeCtx("pi-bob", bobUi));
-    h.assert(reply.includes("replied"), `pi reply failed: ${reply}`);
+    h.assert(reply.includes("Reply sent"), `pi reply failed: ${reply}`);
     const askResult = await askPromise;
     h.assert(askResult.includes("yes from pi runtime"), `pi ask did not receive reply: ${askResult}`);
 
     aliceUi.selections.push(bobUi.addressLabel());
     aliceUi.inputs.push("panel message from pi runtime");
     const panel = await aliceRuntime.runtime.handleCommand("", h.runtimeCtx("pi-alice", aliceUi));
-    h.assert(panel.includes("delivered"), `pi panel send failed: ${panel}`);
+    h.assert(panel.includes("Message sent"), `pi panel send failed: ${panel}`);
     await h.waitFor(() => bobUi.messages.join("\n").includes("panel message from pi runtime"), "bob UI did not render panel message");
 
     const aliceCredential = await loadCredential(h.toWsUrl(), aliceRuntime.paths);
