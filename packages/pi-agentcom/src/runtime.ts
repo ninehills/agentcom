@@ -159,7 +159,10 @@ export class AgentComRuntime {
 
   handleTurnEnd(): void {
     this.replyTracker.endTurn();
-    if (this.latestCtx) this.flushPendingIncoming({ ...this.latestCtx, isIdle: true });
+    if (this.latestCtx) {
+      this.latestCtx = { ...this.latestCtx, isIdle: true };
+      this.flushPendingIncoming(this.latestCtx);
+    }
   }
 
   handleAgentStart(ctx: AgentComContext): void {
@@ -169,7 +172,8 @@ export class AgentComRuntime {
 
   handleAgentEnd(ctx: AgentComContext): void {
     this.activityStatus = null;
-    this.syncCurrentPresence({ ...ctx, isIdle: true });
+    this.latestCtx = { ...ctx, isIdle: true };
+    this.syncCurrentPresence(this.latestCtx);
   }
 
   handleToolStart(ctx: AgentComContext, toolName: string): void {
@@ -686,7 +690,7 @@ function shortSessionId(sessionId: string): string {
 function formatIncomingContent(details: InlineMessageDetails): string {
   const sender = details.from.address || details.from.name || details.from.id.slice(0, 8);
   const replyInstruction = details.replyCommand
-    ? `\n\nTo reply, use ${details.replyCommand}. For multiple pending asks, use the agentcom tool with replyTo: "${details.message.id}".`
+    ? `\n\nTo reply, use the agentcom tool: ${details.replyCommand} or /com reply <message>. For multiple pending asks, use replyTo: "${details.message.id}".`
     : "";
   const body = details.bodyText ?? details.message.content.text;
   return `**📨 From ${sender}** (${details.from.cwd})${replyInstruction}\n\n${body}`;

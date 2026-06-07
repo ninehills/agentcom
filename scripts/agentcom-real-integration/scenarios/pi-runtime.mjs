@@ -31,6 +31,17 @@ export async function runPiRuntimeScenario(h) {
     const askResult = await askPromise;
     h.assert(askResult.includes("yes from pi runtime"), `pi ask did not receive reply: ${askResult}`);
 
+    const bobPostTurnCtx = { ...h.runtimeCtx("pi-bob", bobUi), isIdle: false };
+    bobRuntime.runtime.handleTurnStart(bobPostTurnCtx);
+    bobRuntime.runtime.handleTurnEnd();
+    const postTurnAskPromise = aliceRuntime.runtime.handleCommand(`ask ${bobAddress} are you responsive after turn end?`, h.runtimeCtx("pi-alice", aliceUi, 10_000));
+    await h.waitFor(() => bobUi.messages.join("\n").includes("are you responsive after turn end?"), "bob UI did not render ask delivered after turn_end");
+    h.assert(bobUi.messages.join("\n").includes('com({ action: "reply"'), "bob ask UI missing explicit agentcom tool reply hint");
+    const postTurnReply = await bobRuntime.runtime.handleCommand("reply yes after turn end", h.runtimeCtx("pi-bob", bobUi));
+    h.assert(postTurnReply.includes("Reply sent"), `pi post-turn reply failed: ${postTurnReply}`);
+    const postTurnAskResult = await postTurnAskPromise;
+    h.assert(postTurnAskResult.includes("yes after turn end"), `pi post-turn ask did not receive reply: ${postTurnAskResult}`);
+
     aliceUi.selections.push(bobUi.addressLabel());
     aliceUi.inputs.push("panel message from pi runtime");
     const panel = await aliceRuntime.runtime.handleCommand("", h.runtimeCtx("pi-alice", aliceUi));

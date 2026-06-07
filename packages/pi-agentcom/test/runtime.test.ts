@@ -124,6 +124,7 @@ describe("AgentComRuntime commands", () => {
     await expect(runtime.handleCommand("pending", ctx())).resolves.toContain("please reply");
     await expect(runtime.handleCommand("reply yes", ctx())).resolves.toContain("Reply sent");
     expect(clients[0].sent.at(-1)).toMatchObject({ to: "s-bob", options: { text: "yes", replyTo: "m-remote-ask" } });
+    expect(ui.messages.join("\n")).toContain('com({ action: "reply"');
     expect(ui.messages.join("\n")).toContain("/com reply <message>");
     expect(ui.messages.join("\n")).toContain("Reply target: m-remote");
     expect(entries).toContainEqual(expect.objectContaining({ type: "agentcom_message", details: expect.objectContaining({ from: bob, message: expect.objectContaining({ id: "m-remote-ask" }) }) }));
@@ -160,8 +161,30 @@ describe("AgentComRuntime commands", () => {
       options: { triggerTurn: true },
     });
     expect(customMessages.at(-1)?.message.content).toContain("agentcom tool");
+    expect(customMessages.at(-1)?.message.content).toContain('com({ action: "reply"');
     expect(customMessages.at(-1)?.message.content).toContain("/com reply <message>");
     expect(customMessages.at(-1)?.message.content).toContain('replyTo: "m-render-3"');
+  });
+
+  it("renders new asks immediately after a turn ends", async () => {
+    const { runtime, clients, ctx } = await setup();
+    const customMessages: Array<{ message: any; options: any }> = [];
+    await runtime.handleCommand("join wss://agentcom.example/ws com_dev_ok", ctx());
+
+    runtime.handleTurnStart(ctx({
+      isIdle: false,
+      sendMessage: (message, options) => customMessages.push({ message, options }),
+      injectMessage: vi.fn(),
+      ui: undefined,
+    }));
+    runtime.handleTurnEnd();
+
+    clients[0].emitMessage(bob, { id: "m-after-turn", timestamp: 6, expectsReply: true, content: { text: "are you idle now?" } });
+
+    expect(customMessages.at(-1)).toMatchObject({
+      message: { customType: "agentcom_message", content: expect.stringContaining("are you idle now?") },
+      options: { triggerTurn: true },
+    });
   });
 
   it("queues busy incoming messages until the turn ends", async () => {
