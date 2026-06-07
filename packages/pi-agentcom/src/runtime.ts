@@ -605,7 +605,9 @@ function formatSession(session: SessionInfo): string {
 
 function formatIncomingContent(details: InlineMessageDetails): string {
   const sender = details.from.address || details.from.name || details.from.id.slice(0, 8);
-  const replyInstruction = details.replyCommand ? `\n\nTo reply, use the agentcom tool: ${details.replyCommand} or /com reply <message>` : "";
+  const replyInstruction = details.replyCommand
+    ? `\n\nTo reply, use ${details.replyCommand}. For multiple pending asks, use the agentcom tool with replyTo: "${details.message.id}".`
+    : "";
   const body = details.bodyText ?? details.message.content.text;
   return `**📨 From ${sender}** (${details.from.cwd})${replyInstruction}\n\n${body}`;
 }

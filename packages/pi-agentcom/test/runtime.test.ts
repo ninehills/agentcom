@@ -101,7 +101,8 @@ describe("AgentComRuntime commands", () => {
     await expect(runtime.handleCommand("pending", ctx())).resolves.toContain("please reply");
     await expect(runtime.handleCommand("reply yes", ctx())).resolves.toContain("Reply sent");
     expect(clients[0].sent.at(-1)).toMatchObject({ to: "s-bob", options: { text: "yes", replyTo: "m-remote-ask" } });
-    expect(ui.messages.join("\n")).toContain("com({ action: \"reply\", msg: \"...\", replyTo: \"m-remote-ask\" })");
+    expect(ui.messages.join("\n")).toContain("/com reply <message>");
+    expect(ui.messages.join("\n")).toContain("Reply target: m-remote");
     expect(entries).toContainEqual(expect.objectContaining({ type: "agentcom_message", details: expect.objectContaining({ from: bob, message: expect.objectContaining({ id: "m-remote-ask" }) }) }));
     expect(entries.at(-1)).toMatchObject({ type: "agentcom_sent", details: { message: { text: "yes", replyTo: "m-remote-ask" } } });
 
@@ -136,6 +137,7 @@ describe("AgentComRuntime commands", () => {
       options: { triggerTurn: true },
     });
     expect(customMessages.at(-1)?.message.content).toContain("agentcom tool");
+    expect(customMessages.at(-1)?.message.content).toContain("/com reply <message>");
     expect(customMessages.at(-1)?.message.content).toContain('replyTo: "m-render-3"');
   });
 

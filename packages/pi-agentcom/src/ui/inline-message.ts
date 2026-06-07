@@ -9,7 +9,7 @@ export interface InlineMessageDetails {
 }
 
 export function replyCommandFor(message: AgentComMessage): string | undefined {
-  return message.expectsReply ? `com({ action: "reply", msg: "...", replyTo: "${message.id}" })` : undefined;
+  return message.expectsReply ? "/com reply <message>" : undefined;
 }
 
 export function formatInlineMessage(details: InlineMessageDetails): string {
@@ -67,7 +67,10 @@ function renderInlineMessageBox(details: InlineMessageDetails, width: number, th
 
   if (details.replyCommand) {
     lines.push(row());
-    for (const line of wrapTextWithAnsi(` ↩ To reply: ${details.replyCommand} or /com reply <message>`, bodyWidth)) {
+    for (const line of wrapTextWithAnsi(` ↩ To reply: ${details.replyCommand}`, bodyWidth)) {
+      lines.push(row(dim(line)));
+    }
+    for (const line of wrapTextWithAnsi(`   Reply target: ${details.message.id}`, bodyWidth)) {
       lines.push(row(dim(line)));
     }
   }
