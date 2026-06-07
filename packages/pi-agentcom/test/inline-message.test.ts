@@ -58,8 +58,10 @@ describe("InlineMessageComponent", () => {
 
     expect(lines.some((line) => line.includes("available terminal"))).toBe(true);
     expect(lines.some((line) => line.includes("To reply:"))).toBe(true);
+    expect(lines.join("\n")).toContain("com({");
     expect(lines.join("\n")).toContain("/com reply");
     expect(lines.join("\n")).toContain("<message>");
+    expect(lines.join("\n")).toContain("Reply target: m-12345678");
     for (const line of lines) expect(visibleWidth(line)).toBe(48);
   });
 

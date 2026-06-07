@@ -32,6 +32,24 @@ describe("agentcom tool rendering", () => {
     expect(lines.join("\n")).toContain("Working tree is clean.");
     for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(104);
   });
+
+  it("renders cancelled and top-level tool errors as failures", () => {
+    const tool = registeredComTool();
+
+    const cancelled = tool.renderResult({
+      content: [{ type: "text", text: "Cancelled" }],
+      details: { action: "ask", delivered: true, cancelled: true, messageId: "m-8721a1" },
+    }, { isPartial: false }, theme, {});
+
+    expect(cancelled.render(80).join("\n")).toContain("✗ Cancelled");
+
+    const failed = tool.renderResult({
+      content: [{ type: "text", text: "Not connected" }],
+      isError: true,
+    }, { isPartial: false }, theme, {});
+
+    expect(failed.render(80).join("\n")).toContain("✗ Not connected");
+  });
 });
 
 function registeredComTool() {

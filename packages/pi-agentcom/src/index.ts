@@ -1,6 +1,6 @@
 import { AgentComRuntime, type AgentComContext, type ComToolParams } from "./runtime.ts";
 import { InlineMessageComponent, type InlineMessageDetails } from "./ui/inline-message.ts";
-import { visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { wrapTextWithAnsi } from "@earendil-works/pi-tui";
 
 const comToolParameters = {
   type: "object",
@@ -47,7 +47,7 @@ export default function agentcomExtension(pi: any) {
     presenceTimer = setInterval(() => {
       if (!latestPiCtx) return;
       runtime.syncCurrentPresence(toCtx(latestPiCtx));
-    }, 1_000);
+    }, 5_000);
     (presenceTimer as { unref?: () => void }).unref?.();
   };
 
@@ -71,6 +71,13 @@ export default function agentcomExtension(pi: any) {
     runtime.handleTurnStart(currentCtx);
   });
   pi.on("turn_end", () => runtime.handleTurnEnd());
+  pi.on("agent_start", (_event: unknown, ctx: any) => runtime.handleAgentStart(toCtx(ctx)));
+  pi.on("agent_end", (_event: unknown, ctx: any) => runtime.handleAgentEnd(toCtx(ctx)));
+  pi.on("tool_execution_start", (event: { name?: string; toolName?: string; tool?: { name?: string } }, ctx: any) => {
+    runtime.handleToolStart(toCtx(ctx), event.tool?.name ?? event.toolName ?? event.name ?? "unknown");
+  });
+  pi.on("tool_execution_end", (_event: unknown, ctx: any) => runtime.handleToolEnd(toCtx(ctx)));
+  pi.on("model_select", (_event: unknown, ctx: any) => runtime.syncCurrentPresence(toCtx(ctx)));
   pi.on("session_shutdown", () => {
     stopPresencePolling();
     runtime.shutdown();
@@ -101,8 +108,8 @@ export default function agentcomExtension(pi: any) {
       "Use com when the user asks to communicate with remote agentcom sessions, send a message, ask for a reply, or reply to an agentcom ask.",
     ],
     parameters: comToolParameters,
-    async execute(_toolCallId: string, params: ComToolParams, _signal: AbortSignal, _onUpdate: unknown, ctx: any) {
-      const result = await runtime.handleTool(params, toCtx(ctx));
+    async execute(_toolCallId: string, params: ComToolParams, signal: AbortSignal, _onUpdate: unknown, ctx: any) {
+      const result = await runtime.handleTool(params, toCtx(ctx), signal);
       return {
         content: [{ type: "text", text: result.text }],
         details: result.details,
@@ -121,10 +128,18 @@ export default function agentcomExtension(pi: any) {
       if (messagePreview) text += "\n  " + theme.fg("dim", messagePreview);
       return new TextComponent(text);
     },
-    renderResult(result: { content?: Array<{ type: string; text?: string }>; details?: unknown }, context: { isPartial?: boolean }, theme: ThemeLike, renderContext: { isError?: boolean; expanded?: boolean }) {
+    renderResult(result: { content?: Array<{ type: string; text?: string }>; details?: unknown; isError?: boolean }, context: { isPartial?: boolean }, theme: ThemeLike, renderContext: { isError?: boolean; expanded?: boolean }) {
       if (context.isPartial) return new TextComponent(theme.fg("warning", "AgentCom working..."));
-      const details = result.details as { delivered?: boolean; error?: boolean; messageId?: string; reason?: string } | undefined;
-      const failed = Boolean(renderContext.isError || details?.error === true || details?.delivered === false);
+      const details = result.details as { delivered?: boolean; error?: boolean; ok?: boolean; cancelled?: boolean; timedOut?: boolean; messageId?: string; reason?: string } | undefined;
+      const failed = Boolean(
+        renderContext.isError
+        || result.isError === true
+        || details?.ok === false
+        || details?.error === true
+        || details?.cancelled === true
+        || details?.timedOut === true
+        || details?.delivered === false,
+      );
       let text = failed ? theme.fg("error", "✗ ") : theme.fg("success", "✓ ");
       text += theme.fg(failed ? "error" : "text", firstTextContent(result));
       if (details?.messageId && !renderContext.expanded) text += theme.fg("dim", ` (${details.messageId.slice(0, 8)})`);
@@ -161,7 +176,12 @@ interface ThemeLike {
 }
 
 class TextComponent {
-  constructor(private readonly text: string) {}
+  private readonly text: string;
+
+  constructor(text: string) {
+    this.text = text;
+  }
+
   invalidate(): void {}
   render(width?: number): string[] {
     const maxWidth = typeof width === "number" && Number.isFinite(width) ? Math.max(1, Math.floor(width)) : undefined;

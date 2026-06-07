@@ -40,7 +40,9 @@ describe("AgentComRuntime commands", () => {
     await expect(runtime.handleCommand("send bob hello world", ctx())).resolves.toContain("Message sent");
     expect(clients[0].sent.at(-1)).toMatchObject({ to: "s-bob", options: { text: "hello world" } });
 
-    await expect(runtime.handleCommand("status", ctx())).resolves.toContain("online sessions: 2");
+    const status = await runtime.handleCommand("status", ctx());
+    expect(status).toContain("connected: yes");
+    expect(status).toContain("online sessions: 2");
     await expect(runtime.handleCommand("rename New Node", ctx())).resolves.toContain("new-node");
     await expect(runtime.handleCommand("leave", ctx())).resolves.toContain("left");
 
@@ -57,7 +59,28 @@ describe("AgentComRuntime commands", () => {
     const list = await runtime.handleCommand("list", ctx({ sessionName: "hello" }));
 
     expect(clients[0].presenceUpdates.at(-1)).toMatchObject({ name: "hello", model: "test-model", status: "idle" });
+    expect(list).toContain("Current session:");
+    expect(list).toContain("• hello@test-node (s-self)");
+    expect(list).toContain("Other sessions:");
+    expect(list).toContain("• bob@devbox (s-bob)");
     expect(list).toContain("hello@test-node");
+  });
+
+  it("updates presence from agent and tool lifecycle events", async () => {
+    const { runtime, clients, ctx } = await setup();
+    await runtime.handleCommand("join wss://agentcom.example/ws com_dev_ok", ctx());
+
+    runtime.handleAgentStart(ctx());
+    expect(clients[0].presenceUpdates.at(-1)).toMatchObject({ status: "thinking" });
+
+    runtime.handleToolStart(ctx(), "com");
+    expect(clients[0].presenceUpdates.at(-1)).toMatchObject({ status: "tool:com" });
+
+    runtime.handleToolEnd(ctx());
+    expect(clients[0].presenceUpdates.at(-1)).toMatchObject({ status: "thinking" });
+
+    runtime.handleAgentEnd(ctx());
+    expect(clients[0].presenceUpdates.at(-1)).toMatchObject({ status: "idle" });
   });
 
   it("auto-connects only the configured serverUrl credential on startup", async () => {
@@ -101,7 +124,9 @@ describe("AgentComRuntime commands", () => {
     await expect(runtime.handleCommand("pending", ctx())).resolves.toContain("please reply");
     await expect(runtime.handleCommand("reply yes", ctx())).resolves.toContain("Reply sent");
     expect(clients[0].sent.at(-1)).toMatchObject({ to: "s-bob", options: { text: "yes", replyTo: "m-remote-ask" } });
-    expect(ui.messages.join("\n")).toContain("com({ action: \"reply\", msg: \"...\", replyTo: \"m-remote-ask\" })");
+    expect(ui.messages.join("\n")).toContain('com({ action: "reply"');
+    expect(ui.messages.join("\n")).toContain("/com reply <message>");
+    expect(ui.messages.join("\n")).toContain("Reply target: m-remote");
     expect(entries).toContainEqual(expect.objectContaining({ type: "agentcom_message", details: expect.objectContaining({ from: bob, message: expect.objectContaining({ id: "m-remote-ask" }) }) }));
     expect(entries.at(-1)).toMatchObject({ type: "agentcom_sent", details: { message: { text: "yes", replyTo: "m-remote-ask" } } });
 
@@ -136,10 +161,33 @@ describe("AgentComRuntime commands", () => {
       options: { triggerTurn: true },
     });
     expect(customMessages.at(-1)?.message.content).toContain("agentcom tool");
+    expect(customMessages.at(-1)?.message.content).toContain('com({ action: "reply"');
+    expect(customMessages.at(-1)?.message.content).toContain("/com reply <message>");
     expect(customMessages.at(-1)?.message.content).toContain('replyTo: "m-render-3"');
   });
 
-  it("triggers a turn for follow-up custom incoming messages if the agent is idle by delivery time", async () => {
+  it("renders new asks immediately after a turn ends", async () => {
+    const { runtime, clients, ctx } = await setup();
+    const customMessages: Array<{ message: any; options: any }> = [];
+    await runtime.handleCommand("join wss://agentcom.example/ws com_dev_ok", ctx());
+
+    runtime.handleTurnStart(ctx({
+      isIdle: false,
+      sendMessage: (message, options) => customMessages.push({ message, options }),
+      injectMessage: vi.fn(),
+      ui: undefined,
+    }));
+    runtime.handleTurnEnd();
+
+    clients[0].emitMessage(bob, { id: "m-after-turn", timestamp: 6, expectsReply: true, content: { text: "are you idle now?" } });
+
+    expect(customMessages.at(-1)).toMatchObject({
+      message: { customType: "agentcom_message", content: expect.stringContaining("are you idle now?") },
+      options: { triggerTurn: true },
+    });
+  });
+
+  it("queues busy incoming messages until the turn ends", async () => {
     const { runtime, clients, ctx } = await setup();
     const entries: Array<{ type: string; details: unknown }> = [];
     const customMessages: Array<{ message: any; options: any }> = [];
@@ -154,9 +202,14 @@ describe("AgentComRuntime commands", () => {
 
     clients[0].emitMessage(bob, { id: "m-follow-up", timestamp: 6, expectsReply: true, content: { text: "hello" } });
 
+    expect(customMessages).toHaveLength(0);
+    expect(entries.filter((entry) => entry.type === "agentcom_message")).toHaveLength(0);
+
+    runtime.handleTurnEnd();
+
     expect(customMessages.at(-1)).toMatchObject({
       message: { customType: "agentcom_message", content: expect.stringContaining("hello") },
-      options: { deliverAs: "followUp", triggerTurn: true },
+      options: { triggerTurn: true },
     });
 
     runtime.handleTurnStart(ctx({
@@ -184,6 +237,8 @@ describe("AgentComRuntime commands", () => {
     }));
     clients[0].emitMessage(bob, { id: "m-follow-up", timestamp: 6, expectsReply: true, content: { text: "second" } });
 
+    expect(customMessages).toHaveLength(0);
+    runtime.handleTurnEnd();
     runtime.handleTurnStart(ctx({
       sendMessage: (message, options) => customMessages.push({ message, options }),
       injectMessage: vi.fn(),
@@ -229,6 +284,19 @@ describe("AgentComRuntime commands", () => {
     await expect(runtime.handleCommand("pending", ctx())).resolves.toBe("No pending asks.");
   });
 
+  it("cancels tool asks through AbortSignal and clears pending state", async () => {
+    const { runtime, clients, ctx } = await setup();
+    await runtime.handleCommand("join wss://agentcom.example/ws com_dev_ok", ctx());
+    const controller = new AbortController();
+
+    const askPromise = runtime.handleTool({ action: "ask", to: "bob", message: "still there?" }, ctx({ askTimeoutMs: 1_000 }), controller.signal);
+    await vi.waitFor(() => expect(clients[0].sent.at(-1)?.options.messageId).toBe("m-fixed"));
+    controller.abort();
+
+    await expect(askPromise).resolves.toMatchObject({ ok: false, text: "Cancelled" });
+    await expect(runtime.handleCommand("pending", ctx())).resolves.toBe("No pending asks.");
+  });
+
   it("uses pi-intercom-style custom overlays for the empty /com panel", async () => {
     const { runtime, clients, ui, entries, ctx } = await setup({ customDraft: "from overlay" });
     await runtime.handleCommand("join wss://agentcom.example/ws com_dev_ok", ctx());
@@ -241,12 +309,66 @@ describe("AgentComRuntime commands", () => {
     expect(entries.at(-1)).toMatchObject({ type: "agentcom_sent", details: { to: "bob@devbox", message: { text: "from overlay" } } });
   });
 
+  it("disambiguates duplicate session labels in overlay send results", async () => {
+    const { runtime, clients, entries, ctx } = await setup({ customDraft: "from overlay" });
+    await runtime.handleCommand("join wss://agentcom.example/ws com_dev_ok", ctx());
+    clients[0].sessions = [
+      session({ id: "s-self", name: "pi-main", nodeName: "test-node" }),
+      bob,
+      session({ id: "s-bob2", name: "bob", nodeName: "devbox" }),
+    ];
+
+    await expect(runtime.handleCommand("", ctx({ hasUI: true }))).resolves.toContain("Message sent to bob@devbox (s-bob)");
+    expect(entries.at(-1)).toMatchObject({ type: "agentcom_sent", details: { to: "bob@devbox (s-bob)" } });
+  });
+
+  it("stops stale overlay flows after shutdown", async () => {
+    const { runtime, clients, entries, ctx } = await setup();
+    await runtime.handleCommand("join wss://agentcom.example/ws com_dev_ok", ctx());
+    clients[0].sessions = [session({ id: "s-self", name: "pi-main", nodeName: "test-node" }), bob];
+    let customCalls = 0;
+
+    const result = await runtime.handleCommand("", ctx({
+      hasUI: true,
+      ui: {
+        async custom<T>() {
+          customCalls += 1;
+          if (customCalls === 1) {
+            runtime.shutdown();
+            return bob as T;
+          }
+          return { sent: true, messageId: "m-stale", text: "stale" } as T;
+        },
+      },
+    }));
+
+    expect(result).toBe("No message sent.");
+    expect(customCalls).toBe(1);
+    expect(entries).not.toContainEqual(expect.objectContaining({ type: "agentcom_sent" }));
+  });
+
+  it("cancels pending asks on shutdown", async () => {
+    const { runtime, clients, ctx } = await setup();
+    await runtime.handleCommand("join wss://agentcom.example/ws com_dev_ok", ctx());
+
+    const askPromise = runtime.handleTool({ action: "ask", to: "bob", message: "still there?" }, ctx({ askTimeoutMs: 1_000 }));
+    await vi.waitFor(() => expect(clients[0].sent.at(-1)?.options.messageId).toBe("m-fixed"));
+    runtime.shutdown();
+
+    await expect(askPromise).resolves.toMatchObject({ ok: false, text: "Cancelled" });
+    await expect(runtime.handleCommand("pending", ctx())).resolves.toBe("No pending asks.");
+  });
+
   it("blocks self-target sends and a second ask while waiting", async () => {
     const { runtime, clients, ctx } = await setup();
     await runtime.handleCommand("join wss://agentcom.example/ws com_dev_ok", ctx());
     clients[0].sessions = [session({ id: "s-self", name: "pi-main", nodeName: "test-node" }), bob];
 
     await expect(runtime.handleCommand("send pi-main nope", ctx())).resolves.toContain("Cannot message the current session");
+    await expect(runtime.handleTool({ action: "send", to: "pi-main", message: "nope" }, ctx())).resolves.toMatchObject({
+      ok: false,
+      text: "Cannot message the current session",
+    });
 
     const askPromise = runtime.handleCommand("ask bob first?", ctx({ askTimeoutMs: 1_000 }));
     await vi.waitFor(() => expect(clients[0].sent.at(-1)?.options.messageId).toBe("m-fixed"));
