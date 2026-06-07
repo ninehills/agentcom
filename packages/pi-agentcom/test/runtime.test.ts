@@ -286,6 +286,19 @@ describe("AgentComRuntime commands", () => {
     expect(entries.at(-1)).toMatchObject({ type: "agentcom_sent", details: { to: "bob@devbox", message: { text: "from overlay" } } });
   });
 
+  it("disambiguates duplicate session labels in overlay send results", async () => {
+    const { runtime, clients, entries, ctx } = await setup({ customDraft: "from overlay" });
+    await runtime.handleCommand("join wss://agentcom.example/ws com_dev_ok", ctx());
+    clients[0].sessions = [
+      session({ id: "s-self", name: "pi-main", nodeName: "test-node" }),
+      bob,
+      session({ id: "s-bob2", name: "bob", nodeName: "devbox" }),
+    ];
+
+    await expect(runtime.handleCommand("", ctx({ hasUI: true }))).resolves.toContain("Message sent to bob@devbox (s-bob)");
+    expect(entries.at(-1)).toMatchObject({ type: "agentcom_sent", details: { to: "bob@devbox (s-bob)" } });
+  });
+
   it("stops stale overlay flows after shutdown", async () => {
     const { runtime, clients, entries, ctx } = await setup();
     await runtime.handleCommand("join wss://agentcom.example/ws com_dev_ok", ctx());

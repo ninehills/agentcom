@@ -464,8 +464,9 @@ export class AgentComRuntime {
     if (!text) return "No message entered.";
     const result = await client.send(session.id, { text });
     if (!result.delivered) return formatSendResult(result);
-    ctx.appendEntry?.("agentcom_sent", { to: sessionDisplayName(session), message: { text }, messageId: result.id, timestamp: this.now() });
-    return `Message sent to ${sessionDisplayName(session)}`;
+    const targetLabel = sessionResultLabel(session, duplicateSessionDisplayNames(allSessions));
+    ctx.appendEntry?.("agentcom_sent", { to: targetLabel, message: { text }, messageId: result.id, timestamp: this.now() });
+    return `Message sent to ${targetLabel}`;
   }
 
   private async panelOverlay(ctx: AgentComContext, client: ClientLike, currentSession: SessionInfo, sessions: SessionInfo[]): Promise<string> {
@@ -476,22 +477,23 @@ export class AgentComRuntime {
     ).catch(() => undefined);
     if (!this.isLiveGeneration(generation)) return "No message sent.";
     if (!selectedSession) return "No target selected.";
+    const targetLabel = sessionResultLabel(selectedSession, duplicateSessionDisplayNames([currentSession, ...sessions]));
 
     const result = await ctx.ui?.custom?.<ComposeResult>(
-      (tui, theme, keybindings, done) => new ComposeOverlay(tui, theme, keybindings, selectedSession, sessionDisplayName(selectedSession), client, done),
+      (tui, theme, keybindings, done) => new ComposeOverlay(tui, theme, keybindings, selectedSession, targetLabel, client, done),
       { overlay: true },
     ).catch(() => undefined);
     if (!this.isLiveGeneration(generation)) return "No message sent.";
 
     if (!result?.sent || !result.messageId || !result.text) return "No message sent.";
     ctx.appendEntry?.("agentcom_sent", {
-      to: sessionDisplayName(selectedSession),
+      to: targetLabel,
       message: { text: result.text },
       messageId: result.messageId,
       timestamp: this.now(),
     });
-    ctx.ui?.notify?.(`Message sent to ${sessionDisplayName(selectedSession)}`, "info");
-    return `Message sent to ${sessionDisplayName(selectedSession)}`;
+    ctx.ui?.notify?.(`Message sent to ${targetLabel}`, "info");
+    return `Message sent to ${targetLabel}`;
   }
 
   private isLiveGeneration(generation: number): boolean {
@@ -665,6 +667,20 @@ function formatSessionRow(session: SessionInfo, currentCwd: string | undefined, 
     .filter((tag): tag is string => Boolean(tag));
   const suffix = tags.length ? ` [${tags.join(", ")}]` : "";
   return `• ${session.address} (${session.id}) — ${session.cwd} • ${session.runtime} • ${session.model}${suffix}`;
+}
+
+function duplicateSessionDisplayNames(sessions: SessionInfo[]): Set<string> {
+  const names = sessions.map((session) => sessionDisplayName(session).toLowerCase());
+  return new Set(names.filter((name, index) => names.indexOf(name) !== index));
+}
+
+function sessionResultLabel(session: SessionInfo, duplicates: Set<string>): string {
+  const displayName = sessionDisplayName(session);
+  return duplicates.has(displayName.toLowerCase()) ? `${displayName} (${shortSessionId(session.id)})` : displayName;
+}
+
+function shortSessionId(sessionId: string): string {
+  return sessionId.slice(0, 8);
 }
 
 function formatIncomingContent(details: InlineMessageDetails): string {
