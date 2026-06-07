@@ -1,6 +1,6 @@
 import { AgentComRuntime, type AgentComContext, type ComToolParams } from "./runtime.ts";
 import { InlineMessageComponent, type InlineMessageDetails } from "./ui/inline-message.ts";
-import { visibleWidth } from "./ui/session-list.ts";
+import { visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 
 const comToolParameters = {
   type: "object",
@@ -167,60 +167,8 @@ class TextComponent {
     const maxWidth = typeof width === "number" && Number.isFinite(width) ? Math.max(1, Math.floor(width)) : undefined;
     const lines = this.text.split("\n");
     if (!maxWidth) return lines;
-    return lines.flatMap((line) => wrapRenderedLine(line, maxWidth));
+    return lines.flatMap((line) => wrapTextWithAnsi(line, maxWidth));
   }
-}
-
-const ANSI_RE = /\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g;
-
-function wrapRenderedLine(line: string, width: number): string[] {
-  if (visibleWidth(line) <= width) return [line];
-  const plain = line.replace(ANSI_RE, "");
-  const wrapped: string[] = [];
-  let current = "";
-
-  for (const token of plain.split(/(\s+)/)) {
-    if (!token) continue;
-    if (/^\s+$/.test(token)) {
-      if (current && !current.endsWith(" ")) current += " ";
-      continue;
-    }
-
-    const candidate = current ? `${current}${token}` : token;
-    if (visibleWidth(candidate) <= width) {
-      current = candidate;
-      continue;
-    }
-
-    if (current.trimEnd()) wrapped.push(current.trimEnd());
-    current = "";
-
-    for (const chunk of splitLongToken(token, width)) {
-      if (visibleWidth(chunk) >= width) wrapped.push(chunk);
-      else current = chunk;
-    }
-  }
-
-  if (current.trimEnd()) wrapped.push(current.trimEnd());
-  return wrapped.length ? wrapped : [""];
-}
-
-function splitLongToken(token: string, width: number): string[] {
-  const chunks: string[] = [];
-  let current = "";
-  let used = 0;
-  for (const char of token) {
-    const next = visibleWidth(char);
-    if (used > 0 && used + next > width) {
-      chunks.push(current);
-      current = "";
-      used = 0;
-    }
-    current += char;
-    used += next;
-  }
-  if (current) chunks.push(current);
-  return chunks;
 }
 
 function previewText(value: unknown, maxLength = 72): string | undefined {

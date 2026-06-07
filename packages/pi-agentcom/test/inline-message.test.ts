@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AgentComMessage, SessionInfo } from "@agentcom/protocol";
+import { visibleWidth } from "@earendil-works/pi-tui";
 import { formatInlineMessage, InlineMessageComponent, replyCommandFor } from "../src/ui/inline-message.ts";
 
 const theme = {
@@ -78,26 +79,20 @@ describe("InlineMessageComponent", () => {
     expect(lines.join("\n")).toContain("Reply to m-origin");
     for (const line of lines) expect(visibleWidth(line)).toBe(72);
   });
+
+  it("does not over-pad rows containing default emoji presentation characters", () => {
+    const component = new InlineMessageComponent({
+      from,
+      message: {
+        ...message,
+        content: { text: "P-2026-203 已更新完毕 ✅" },
+      },
+    }, theme);
+
+    const lines = component.render(148);
+
+    expect(visibleWidth("✅")).toBe(2);
+    expect(lines.some((line) => line.includes("P-2026-203 已更新完毕 ✅"))).toBe(true);
+    for (const line of lines) expect(visibleWidth(line)).toBe(148);
+  });
 });
-
-function visibleWidth(text: string): number {
-  return [...text].reduce((width, char) => width + (isWide(char.codePointAt(0) ?? 0) ? 2 : 1), 0);
-}
-
-function isWide(code: number): boolean {
-  return code >= 0x1100 && (
-    code <= 0x115f ||
-    code === 0x2329 ||
-    code === 0x232a ||
-    (code >= 0x2e80 && code <= 0xa4cf && code !== 0x303f) ||
-    (code >= 0xac00 && code <= 0xd7a3) ||
-    (code >= 0xf900 && code <= 0xfaff) ||
-    (code >= 0xfe10 && code <= 0xfe19) ||
-    (code >= 0xfe30 && code <= 0xfe6f) ||
-    (code >= 0xff00 && code <= 0xff60) ||
-    (code >= 0xffe0 && code <= 0xffe6) ||
-    (code >= 0x1f300 && code <= 0x1f64f) ||
-    (code >= 0x1f900 && code <= 0x1f9ff) ||
-    (code >= 0x20000 && code <= 0x3fffd)
-  );
-}

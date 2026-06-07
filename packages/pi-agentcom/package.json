@@ -31,7 +31,8 @@
   },
   "dependencies": {
     "@agentcom/client": "0.1.0",
-    "@agentcom/protocol": "0.1.0"
+    "@agentcom/protocol": "0.1.0",
+    "@earendil-works/pi-tui": "^0.78.1"
   },
   "publishConfig": {
     "access": "public"

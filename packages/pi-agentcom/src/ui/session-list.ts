@@ -1,4 +1,7 @@
 import type { SessionInfo } from "@agentcom/protocol";
+import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+
+export { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
 export interface SessionOption {
   label: string;
@@ -192,58 +195,17 @@ function shortSessionId(sessionId: string): string {
 function middleTruncate(text: string, maxWidth: number): string {
   if (visibleWidth(text) <= maxWidth) return text;
   if (maxWidth <= 3) return truncateToWidth(text, maxWidth, "");
+  const chars = [...text];
   const targetSideWidth = Math.max(1, Math.floor((maxWidth - 1) / 2));
   let left = "";
-  for (const char of text) {
+  for (const char of chars) {
     if (visibleWidth(left + char) > targetSideWidth) break;
     left += char;
   }
   let right = "";
-  for (const char of [...text].reverse()) {
+  for (const char of chars.slice().reverse()) {
     if (visibleWidth(char + right) > targetSideWidth) break;
     right = char + right;
   }
   return truncateToWidth(`${left}…${right}`, maxWidth, "");
-}
-
-export const ANSI_RE = /\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g;
-
-export function visibleWidth(text: string): number {
-  let width = 0;
-  for (const char of text.replace(ANSI_RE, "")) width += charWidth(char);
-  return width;
-}
-
-export function truncateToWidth(text: string, width: number, suffix = "…", preferNoSuffix = false): string {
-  if (width <= 0) return "";
-  if (visibleWidth(text) <= width) return text;
-  const ellipsis = preferNoSuffix ? "" : suffix;
-  const target = Math.max(0, width - visibleWidth(ellipsis));
-  let out = "";
-  let used = 0;
-  for (const char of text.replace(ANSI_RE, "")) {
-    const next = charWidth(char);
-    if (used + next > target) break;
-    out += char;
-    used += next;
-  }
-  return `${out}${ellipsis}`;
-}
-
-function charWidth(char: string): number {
-  const code = char.codePointAt(0) ?? 0;
-  if (code === 0 || code < 32 || (code >= 0x7f && code < 0xa0)) return 0;
-  return code >= 0x1100 && (
-    code <= 0x115f || code === 0x2329 || code === 0x232a ||
-    (code >= 0x2e80 && code <= 0xa4cf && code !== 0x303f) ||
-    (code >= 0xac00 && code <= 0xd7a3) ||
-    (code >= 0xf900 && code <= 0xfaff) ||
-    (code >= 0xfe10 && code <= 0xfe19) ||
-    (code >= 0xfe30 && code <= 0xfe6f) ||
-    (code >= 0xff00 && code <= 0xff60) ||
-    (code >= 0xffe0 && code <= 0xffe6) ||
-    (code >= 0x1f300 && code <= 0x1f64f) ||
-    (code >= 0x1f900 && code <= 0x1f9ff) ||
-    (code >= 0x20000 && code <= 0x3fffd)
-  ) ? 2 : 1;
 }
