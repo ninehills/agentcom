@@ -1,7 +1,8 @@
 import type { AgentComUi } from "../runtime.ts";
 import type { AgentComMessage, Attachment, SessionInfo } from "@agentcom/protocol";
 import type { SendResult } from "@agentcom/client/com-client";
-import { defaultKeybindings, defaultTheme, truncateToWidth, visibleWidth, type KeybindingsLike, type ThemeLike } from "./session-list.ts";
+import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { defaultKeybindings, defaultTheme, defaultTui, type KeybindingsLike, type ThemeLike, type TuiLike } from "./adapters.ts";
 
 export async function composeMessage(ui: AgentComUi | undefined, title = "Message"): Promise<string | undefined> {
   const text = await (ui?.editor?.(title, "") ?? ui?.input?.(title, ""));
@@ -40,7 +41,7 @@ export class ComposeOverlay {
     client: ComposeClientLike,
     done: (result: ComposeResult) => void,
   ) {
-    this.tui = isTuiLike(tui) ? tui : { requestRender() {} };
+    this.tui = defaultTui(tui);
     this.theme = defaultTheme(theme);
     this.keybindings = defaultKeybindings(keybindings);
     this.target = target;
@@ -136,14 +137,6 @@ export class ComposeOverlay {
     lines.push(border(`╰${"─".repeat(contentWidth)}╯`));
     return lines;
   }
-}
-
-function isTuiLike(value: unknown): value is TuiLike {
-  return typeof value === "object" && value !== null && typeof (value as TuiLike).requestRender === "function";
-}
-
-interface TuiLike {
-  requestRender(): void;
 }
 
 export function formatAttachments(attachments: AgentComMessage["content"]["attachments"]): string {

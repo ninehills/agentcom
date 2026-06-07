@@ -1,5 +1,6 @@
 import type { AgentComMessage, SessionInfo } from "@agentcom/protocol";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { defaultTheme, type ThemeLike } from "./adapters.ts";
 
 export interface InlineMessageDetails {
   from: SessionInfo;
@@ -22,24 +23,16 @@ export class InlineMessageComponent {
 
   constructor(details: InlineMessageDetails, theme?: unknown) {
     this.details = details;
-    this.theme = isThemeLike(theme) ? theme : undefined;
+    this.theme = defaultTheme(theme);
   }
 
   invalidate(): void {}
 
   render(width: number): string[] {
-    const accent = (text: string) => this.theme?.fg?.("accent", text) ?? text;
-    const dim = (text: string) => this.theme?.fg?.("dim", text) ?? text;
+    const accent = (text: string) => this.theme?.fg("accent", text) ?? text;
+    const dim = (text: string) => this.theme?.fg("dim", text) ?? text;
     return renderInlineMessageBox(this.details, width, { accent, dim });
   }
-}
-
-interface ThemeLike {
-  fg?: (name: string, text: string) => string;
-}
-
-function isThemeLike(theme: unknown): theme is ThemeLike {
-  return typeof theme === "object" && theme !== null && ("fg" in theme ? typeof (theme as ThemeLike).fg === "function" : true);
 }
 
 function senderName(from: SessionInfo): string {
