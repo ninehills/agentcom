@@ -74,6 +74,12 @@ interface OutgoingAsk {
   resolve: (message: AgentComMessage) => void;
 }
 
+interface ActionResult {
+  ok: boolean;
+  text: string;
+  details?: Record<string, unknown>;
+}
+
 export class AgentComRuntime {
   private readonly paths: Partial<ConfigPaths>;
   private readonly clientFactory: (serverUrl: string) => ClientLike;
@@ -171,17 +177,17 @@ export class AgentComRuntime {
     this.config = await loadConfig(this.paths) as AgentComConfig & { enabled?: boolean };
     try {
       const message = params.message ?? params.msg ?? "";
-      let text: string;
+      let result: ActionResult;
       switch (params.action) {
-        case "list": text = await this.list(); break;
-        case "send": text = await this.sendTo(params.to, message, params.attachments, ctx, params.replyTo); break;
-        case "ask": text = await this.ask(params.to, message, ctx, params.attachments); break;
-        case "reply": text = await this.reply(message, params.replyTo, params.to); break;
-        case "pending": text = await this.pending(); break;
-        case "status": text = await this.status(); break;
-        default: text = `Unknown com action: ${(params as { action: string }).action}`;
+        case "list": result = ok(await this.list()); break;
+        case "send": result = await this.sendToResult(params.to, message, params.attachments, ctx, params.replyTo); break;
+        case "ask": result = await this.askResult(params.to, message, ctx, params.attachments); break;
+        case "reply": result = await this.replyResult(message, params.replyTo, params.to); break;
+        case "pending": result = ok(await this.pending()); break;
+        case "status": result = ok(await this.status()); break;
+        default: result = fail(`Unknown com action: ${(params as { action: string }).action}`);
       }
-      return { ok: !isLikelyError(text), text, details: { action: params.action } };
+      return { ok: result.ok, text: result.text, details: { action: params.action, ...result.details } };
     } catch (error) {
       return { ok: false, text: this.userError(error) };
     }
@@ -238,23 +244,27 @@ export class AgentComRuntime {
   }
 
   private async sendTo(target: string | undefined, text: string, attachments?: Attachment[], ctx?: AgentComContext, replyTo?: string): Promise<string> {
-    if (!target) return "Missing target.";
-    if (!text) return "Missing message.";
+    return (await this.sendToResult(target, text, attachments, ctx, replyTo)).text;
+  }
+
+  private async sendToResult(target: string | undefined, text: string, attachments?: Attachment[], ctx?: AgentComContext, replyTo?: string): Promise<ActionResult> {
+    if (!target) return fail("Missing target.");
+    if (!text) return fail("Missing message.");
     const client = this.requireConnected();
     if (this.latestCtx) this.syncCurrentPresence(this.latestCtx);
     const sessions = await client.listSessions();
     const resolved = resolveTarget(sessions, target);
-    if (!resolved.found) return resolved.reason;
-    if (resolved.sessionId === client.sessionId) return "Cannot message the current session";
+    if (!resolved.found) return fail(resolved.reason);
+    if (resolved.sessionId === client.sessionId) return fail("Cannot message the current session");
     if (!replyTo && this.config.confirmSend && ctx?.hasUI && ctx.ui?.confirm) {
       const confirmed = await ctx.ui.confirm("Send Message", `Send to "${target}":\n\n${text}${formatAttachments(attachments)}`);
-      if (!confirmed) return "Message cancelled by user";
+      if (!confirmed) return fail("Message cancelled by user");
     }
     const result = await client.send(resolved.sessionId, { text, attachments, replyTo });
-    if (!result.delivered) return `Message to "${target}" was not delivered: ${result.reason ?? "Session may not exist or has disconnected."}`;
+    if (!result.delivered) return fail(`Message to "${target}" was not delivered: ${result.reason ?? "Session may not exist or has disconnected."}`, { delivered: false, reason: result.reason, messageId: result.id });
     if (replyTo) this.replyTracker.markReplied(replyTo);
     ctx?.appendEntry?.("agentcom_sent", { to: target, message: { text, attachments, replyTo }, messageId: result.id, timestamp: this.now() });
-    return `Message sent to ${target}`;
+    return ok(`Message sent to ${target}`, { delivered: true, messageId: result.id });
   }
 
   private async askCommand(rest: string, ctx: AgentComContext): Promise<string> {
@@ -263,15 +273,19 @@ export class AgentComRuntime {
   }
 
   private async ask(target: string | undefined, text: string, ctx: AgentComContext, attachments?: Attachment[]): Promise<string> {
-    if (!target) return "Usage: /com ask <target> <message>";
-    if (!text) return "Missing message.";
-    if ([...this.outgoingAsks.values()].some((ask) => ask.status === "waiting")) return "Already waiting for a reply";
+    return (await this.askResult(target, text, ctx, attachments)).text;
+  }
+
+  private async askResult(target: string | undefined, text: string, ctx: AgentComContext, attachments?: Attachment[]): Promise<ActionResult> {
+    if (!target) return fail("Usage: /com ask <target> <message>");
+    if (!text) return fail("Missing message.");
+    if ([...this.outgoingAsks.values()].some((ask) => ask.status === "waiting")) return fail("Already waiting for a reply");
     const client = this.requireConnected();
     this.syncCurrentPresence(ctx);
     const sessions = await client.listSessions();
     const resolved = resolveTarget(sessions, target);
-    if (!resolved.found) return resolved.reason;
-    if (resolved.sessionId === client.sessionId) return "Cannot message the current session";
+    if (!resolved.found) return fail(resolved.reason);
+    if (resolved.sessionId === client.sessionId) return fail("Cannot message the current session");
     const messageId = `m-${this.randomId()}`;
     let timeout: ReturnType<typeof setTimeout> | null = null;
     const clearPendingAsk = () => {
@@ -307,24 +321,28 @@ export class AgentComRuntime {
     }
     if (!ack.delivered) {
       clearPendingAsk();
-      return formatSendResult(ack);
+      return fail(formatSendResult(ack), { delivered: false, reason: ack.reason, messageId: ack.id });
     }
     ctx.appendEntry?.("agentcom_sent", { to: target, message: { text, attachments, expectsReply: true }, messageId: ack.id, timestamp: this.now() });
     const reply = await replyPromise;
-    if (!reply) return `ask delivered but timed out waiting for reply (${messageId})`;
+    if (!reply) return fail(`ask delivered but timed out waiting for reply (${messageId})`, { delivered: true, timedOut: true, messageId });
     ctx.appendEntry?.("agentcom_received", { from: target, message: { text: reply.content.text, attachments: reply.content.attachments }, messageId: reply.id, timestamp: reply.timestamp });
-    return `**Reply from ${target}:**\n${reply.content.text}${formatAttachments(reply.content.attachments)}`;
+    return ok(`**Reply from ${target}:**\n${reply.content.text}${formatAttachments(reply.content.attachments)}`, { delivered: true, messageId, replyId: reply.id });
   }
 
   private async reply(text: string, replyTo?: string, to?: string): Promise<string> {
-    if (!text) return "Usage: /com reply <message>";
+    return (await this.replyResult(text, replyTo, to)).text;
+  }
+
+  private async replyResult(text: string, replyTo?: string, to?: string): Promise<ActionResult> {
+    if (!text) return fail("Usage: /com reply <message>");
     const client = this.requireConnected();
     const ask = this.replyTracker.resolveReplyTarget({ replyTo, to }, this.now());
     const result = await client.send(ask.from.id, { text, replyTo: ask.message.id });
-    if (!result.delivered) return formatSendResult(result);
+    if (!result.delivered) return fail(formatSendResult(result), { delivered: false, reason: result.reason, messageId: result.id });
     this.replyTracker.markReplied(ask.message.id);
     this.latestCtx?.appendEntry?.("agentcom_sent", { to: ask.from.address, message: { text, replyTo: ask.message.id }, messageId: result.id, timestamp: this.now() });
-    return `Reply sent to ${ask.from.address}`;
+    return ok(`Reply sent to ${ask.from.address}`, { delivered: true, messageId: result.id, replyTo: ask.message.id });
   }
 
   private async pending(): Promise<string> {
@@ -578,6 +596,10 @@ function randomId(): string {
   return [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-function isLikelyError(text: string): boolean {
-  return /^(Usage:|Missing|No |Not connected|Unknown|delivery failed|Multiple sessions|Run \/com auth)/i.test(text);
+function ok(text: string, details?: Record<string, unknown>): ActionResult {
+  return { ok: true, text, details };
+}
+
+function fail(text: string, details?: Record<string, unknown>): ActionResult {
+  return { ok: false, text, details };
 }

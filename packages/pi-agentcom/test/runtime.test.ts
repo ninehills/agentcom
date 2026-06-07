@@ -247,6 +247,10 @@ describe("AgentComRuntime commands", () => {
     clients[0].sessions = [session({ id: "s-self", name: "pi-main", nodeName: "test-node" }), bob];
 
     await expect(runtime.handleCommand("send pi-main nope", ctx())).resolves.toContain("Cannot message the current session");
+    await expect(runtime.handleTool({ action: "send", to: "pi-main", message: "nope" }, ctx())).resolves.toMatchObject({
+      ok: false,
+      text: "Cannot message the current session",
+    });
 
     const askPromise = runtime.handleCommand("ask bob first?", ctx({ askTimeoutMs: 1_000 }));
     await vi.waitFor(() => expect(clients[0].sent.at(-1)?.options.messageId).toBe("m-fixed"));
