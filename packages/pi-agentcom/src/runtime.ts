@@ -4,7 +4,7 @@ import { RemoteComClient, type SendResult } from "@agentcom/client/com-client";
 import { getConfigPaths, loadConfig, normalizeServerUrl, saveConfig, type AgentComConfig, type ConfigPaths } from "@agentcom/client/config";
 import { loadCredential, removeCredential, saveCredential } from "@agentcom/client/credentials";
 import type { AgentComCredential } from "@agentcom/client/credentials";
-import { ReplyTracker } from "./reply-tracker.ts";
+import { ReplyTracker, type AgentComMessageContext } from "./reply-tracker.ts";
 import { ComposeOverlay, composeMessage, formatAttachments, type ComposeResult } from "./ui/compose.ts";
 import { buildSessionOptions, defaultKeybindings, defaultTheme, SessionListOverlay, sessionDisplayName } from "./ui/session-list.ts";
 import { formatInlineMessage, replyCommandFor, type InlineMessageDetails } from "./ui/inline-message.ts";
@@ -80,6 +80,12 @@ interface ActionResult {
   details?: Record<string, unknown>;
 }
 
+interface PendingIncomingMessage {
+  from: SessionInfo;
+  message: AgentComMessage;
+  context: AgentComMessageContext;
+}
+
 export class AgentComRuntime {
   private readonly paths: Partial<ConfigPaths>;
   private readonly clientFactory: (serverUrl: string) => ClientLike;
@@ -94,6 +100,7 @@ export class AgentComRuntime {
   private lastPresenceKey: string | null = null;
   private readonly replyTracker: ReplyTracker;
   private readonly outgoingAsks = new Map<string, OutgoingAsk>();
+  private readonly pendingIncomingMessages: PendingIncomingMessage[] = [];
 
   constructor(options: RuntimeOptions = {}) {
     this.paths = options.paths ?? getConfigPaths();
@@ -136,6 +143,7 @@ export class AgentComRuntime {
     this.client = null;
     this.clientServerUrl = null;
     this.replyTracker.reset();
+    this.pendingIncomingMessages.length = 0;
   }
 
   handleTurnStart(ctx: AgentComContext): void {
@@ -145,6 +153,7 @@ export class AgentComRuntime {
 
   handleTurnEnd(): void {
     this.replyTracker.endTurn();
+    if (this.latestCtx) this.flushPendingIncoming({ ...this.latestCtx, isIdle: true });
   }
 
   async handleCommand(args: string, ctx: AgentComContext): Promise<string> {
@@ -481,7 +490,15 @@ export class AgentComRuntime {
       this.renderIncoming(from, message, this.latestCtx, "steer");
     } else {
       this.replyTracker.queueTurnContext(context);
-      this.renderIncoming(from, message, this.latestCtx, "followUp");
+      this.pendingIncomingMessages.push({ from, message, context });
+    }
+  }
+
+  private flushPendingIncoming(ctx: AgentComContext): void {
+    if (this.pendingIncomingMessages.length === 0) return;
+    const pending = this.pendingIncomingMessages.splice(0);
+    for (const entry of pending) {
+      this.renderIncoming(entry.from, entry.message, ctx, "steer");
     }
   }
 

@@ -139,7 +139,7 @@ describe("AgentComRuntime commands", () => {
     expect(customMessages.at(-1)?.message.content).toContain('replyTo: "m-render-3"');
   });
 
-  it("triggers a turn for follow-up custom incoming messages if the agent is idle by delivery time", async () => {
+  it("queues busy incoming messages until the turn ends", async () => {
     const { runtime, clients, ctx } = await setup();
     const entries: Array<{ type: string; details: unknown }> = [];
     const customMessages: Array<{ message: any; options: any }> = [];
@@ -154,9 +154,14 @@ describe("AgentComRuntime commands", () => {
 
     clients[0].emitMessage(bob, { id: "m-follow-up", timestamp: 6, expectsReply: true, content: { text: "hello" } });
 
+    expect(customMessages).toHaveLength(0);
+    expect(entries.filter((entry) => entry.type === "agentcom_message")).toHaveLength(0);
+
+    runtime.handleTurnEnd();
+
     expect(customMessages.at(-1)).toMatchObject({
       message: { customType: "agentcom_message", content: expect.stringContaining("hello") },
-      options: { deliverAs: "followUp", triggerTurn: true },
+      options: { triggerTurn: true },
     });
 
     runtime.handleTurnStart(ctx({
@@ -184,6 +189,8 @@ describe("AgentComRuntime commands", () => {
     }));
     clients[0].emitMessage(bob, { id: "m-follow-up", timestamp: 6, expectsReply: true, content: { text: "second" } });
 
+    expect(customMessages).toHaveLength(0);
+    runtime.handleTurnEnd();
     runtime.handleTurnStart(ctx({
       sendMessage: (message, options) => customMessages.push({ message, options }),
       injectMessage: vi.fn(),
